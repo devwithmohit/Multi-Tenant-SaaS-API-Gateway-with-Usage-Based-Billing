@@ -12,6 +12,10 @@ type Config struct {
 	LogLevel    string
 	BackendURLs map[string]string // service_name -> URL
 	APIKeys     map[string]*APIKeyConfig
+	RedisAddr   string
+	RedisPassword string
+	RedisDB     int
+	DatabaseURL string
 }
 
 // APIKeyConfig represents a temporary hardcoded API key configuration
@@ -24,10 +28,14 @@ type APIKeyConfig struct {
 // Load reads configuration from environment variables
 func Load() (*Config, error) {
 	cfg := &Config{
-		Port:        getEnv("GATEWAY_PORT", "8080"),
-		LogLevel:    getEnv("LOG_LEVEL", "info"),
-		BackendURLs: make(map[string]string),
-		APIKeys:     make(map[string]*APIKeyConfig),
+		Port:          getEnv("GATEWAY_PORT", "8080"),
+		LogLevel:      getEnv("LOG_LEVEL", "info"),
+		BackendURLs:   make(map[string]string),
+		APIKeys:       make(map[string]*APIKeyConfig),
+		RedisAddr:     getEnv("REDIS_ADDR", "localhost:6379"),
+		RedisPassword: getEnv("REDIS_PASSWORD", ""),
+		RedisDB:       getEnvInt("REDIS_DB", 0),
+		DatabaseURL:   os.Getenv("DATABASE_URL"),
 	}
 
 	// Parse backend URLs
@@ -69,6 +77,18 @@ func Load() (*Config, error) {
 func getEnv(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
+	}
+	return defaultValue
+}
+
+// getEnvInt retrieves an integer environment variable or returns a default value
+func getEnvInt(key string, defaultValue int) int {
+	if value := os.Getenv(key); value != "" {
+		var intVal int
+		_, err := fmt.Sscanf(value, "%d", &intVal)
+		if err == nil {
+			return intVal
+		}
 	}
 	return defaultValue
 }

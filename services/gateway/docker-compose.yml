@@ -1,0 +1,43 @@
+version: "3.8"
+
+services:
+  redis:
+    image: redis:7.2-alpine
+    container_name: saas-gateway-redis
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - gateway-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # Optional: Redis Commander for GUI management
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: saas-gateway-redis-commander
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    ports:
+      - "8081:8081"
+    networks:
+      - gateway-network
+    depends_on:
+      - redis
+    restart: unless-stopped
+    profiles:
+      - tools # Only start with: docker-compose --profile tools up
+
+volumes:
+  redis_data:
+    driver: local
+
+networks:
+  gateway-network:
+    driver: bridge

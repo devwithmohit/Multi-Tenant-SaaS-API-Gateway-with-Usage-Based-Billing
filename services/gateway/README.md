@@ -1,16 +1,18 @@
-# API Gateway - Phase 1 MVP
+# API Gateway - Multi-Tenant SaaS
 
-Multi-tenant SaaS API Gateway with authentication and reverse proxy capabilities.
+Multi-tenant SaaS API Gateway with authentication, rate limiting, and reverse proxy capabilities.
 
 ## Features
 
-- ✅ API Key authentication via `Authorization: Bearer <key>` header
-- ✅ Reverse proxy to configurable backend services
-- ✅ Structured JSON logging
-- ✅ Panic recovery middleware
-- ✅ Health check endpoints
-- ✅ Request context propagation
-- ✅ Multi-backend support
+- ✅ **API Key authentication** via `Authorization: Bearer <key>` header
+- ✅ **Redis-backed rate limiting** with token bucket algorithm
+- ✅ **Reverse proxy** to configurable backend services
+- ✅ **Structured JSON logging** with request tracing
+- ✅ **Panic recovery** middleware
+- ✅ **Health check endpoints** (Kubernetes-ready)
+- ✅ **Request context propagation** to backends
+- ✅ **Multi-backend support** with service routing
+- ✅ **Burst traffic handling** with configurable allowances
 
 ## Architecture
 
@@ -22,6 +24,8 @@ Client Request
 [Logging Middleware] → Structured JSON logs
     ↓
 [Auth Middleware] → Validates API key
+    ↓
+[Rate Limit Middleware] → Redis token bucket (Phase 2)
     ↓
 [Proxy Handler] → Routes to backend service
     ↓
@@ -68,7 +72,7 @@ go install github.com/joho/godotenv/cmd/godotenv@latest
 godotenv -f .env go run cmd/server/main.go
 ```
 
-### 4. Test the Gateway
+### 5. Test the Gateway
 
 **Health Check:**
 
@@ -83,11 +87,19 @@ curl -H "Authorization: Bearer sk_test_abc123" \
      http://localhost:8080/api/users
 ```
 
-**Invalid API Key:**
+**Check Rate Limit Headers:**
 
 ```bash
-curl -H "Authorization: Bearer invalid_key" \
-     http://localhost:8080/api/users
+curl -i -H "Authorization: Bearer sk_test_abc123" \
+     http://localhost:8080/api/test | grep X-RateLimit
+```
+
+**Trigger Rate Limit (automated test):**
+
+```bash
+# Run test suite
+bash scripts/test-ratelimit.sh       # Linux/macOS
+./scripts/test-ratelimit.ps1         # Windows PowerShell
 ```
 
 ## API Endpoints
@@ -114,12 +126,16 @@ The gateway will proxy requests to the configured backend service.
 
 ### Environment Variables
 
-| Variable         | Required | Description                                  | Example                                                |
-| ---------------- | -------- | -------------------------------------------- | ------------------------------------------------------ |
-| `GATEWAY_PORT`   | No       | Server port (default: 8080)                  | `8080`                                                 |
-| `LOG_LEVEL`      | No       | Logging level (default: info)                | `info`, `debug`, `warn`, `error`                       |
-| `BACKEND_URLS`   | Yes      | Backend services (comma-separated)           | `api=http://localhost:3000,auth=http://localhost:3001` |
-| `VALID_API_KEYS` | Yes      | Temporary API keys (format: key:org_id:tier) | `sk_test_abc:org1:premium`                             |
+| Variable         | Required | Description                          | Example                               |
+| ---------------- | -------- | ------------------------------------ | ------------------------------------- |
+| `GATEWAY_PORT`   | No       | Server port (default: 8080)          | `8080`                                |
+| `LOG_LEVEL`      | No       | Logging level (default: info)        | `info`, `debug`, `warn`, `error`      |
+| `REDIS_ADDR`     | No       | Redis server address                 | `localhost:6379`                      |
+| `REDIS_PASSWORD` | No       | Redis password (if auth enabled)     | `your_password`                       |
+| `REDIS_DB`       | No       | Redis database number (default: 0)   | `0`                                   |
+| `DATABASE_URL`   | No       | PostgreSQL connection (Phase 2)      | `postgresql://user:pass@localhost/db` |
+| `BACKEND_URLS`   | Yes      | Backend services (comma-separated)   | `api=http://localhost:3000`           |
+| `VALID_API_KEYS` | Yes      | Temporary API keys (key:org_id:tier) | `sk_test_abc:org1:premium`            |
 
 ### API Key Format
 
@@ -186,6 +202,81 @@ All errors return JSON:
 ```
 
 **Common Status Codes:**
+
+- `401` - Missing or malformed Authorization header
+- `403` - Invalid, revoked, or expired API key
+- `404` - Service not found
+- `429` - Rate limit exceeded (see details in response)
+- `500` - Internal server error
+- `502` - Backend service unavailable
+- `504` - Backend service timeout
+
+## Rate Limiting
+
+### How It Works
+
+The gateway enforces two types of limits per organization:
+
+1. **Per-Minute Limit** - Sustained rate (e.g., 1000 req/min)
+2. **Per-Day Limit** - Daily quota (e.g., 100,000 req/day)
+3. **Burst Allowance** - Extra capacity for spikes (e.g., +500)
+
+### Rate Limit Response
+
+When rate limited, the gateway returns `429 Too Many Requests`:
+
+```json
+{
+  "error": {
+    "code": 429,
+    "message": "Rate limit exceeded: minute limit reached",
+    "details": {
+      "limit_type": "minute",
+      "daily_used": 1234,
+      "minute_used": 1500,
+      "reset_at": "2026-01-25T14:32:00Z",
+      "retry_after": 45
+    }
+  },
+  "timestamp": "2026-01-25T14:31:15Z",
+  "request_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+### Rate Limit Headers
+
+All responses include rate limit information:
+
+```http
+X-RateLimit-Limit-Minute: 1000
+X-RateLimit-Limit-Day: 100000
+X-RateLimit-Remaining-Minute: 847
+X-RateLimit-Remaining-Day: 95234
+X-RateLimit-Reset-Minute: 2026-01-25T14:32:00Z
+X-RateLimit-Reset-Day: 2026-01-26T00:00:00Z
+```
+
+**When rate limited:**
+
+```http
+Retry-After: 45  (seconds until reset)
+```
+
+### Testing Rate Limits
+
+```bash
+# Automated test suite
+bash scripts/test-ratelimit.sh       # Linux/macOS
+./scripts/test-ratelimit.ps1         # Windows PowerShell
+
+# Manual testing with loop
+for i in {1..150}; do
+  curl -H "Authorization: Bearer sk_test_abc123" \
+       http://localhost:8080/api/test \
+       -w "\nStatus: %{http_code}\n"
+  sleep 0.1
+done
+```
 
 - `401` - Missing or malformed Authorization header
 - `403` - Invalid, revoked, or expired API key

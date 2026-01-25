@@ -14,6 +14,7 @@ import (
 	"github.com/saas-gateway/gateway/internal/config"
 	"github.com/saas-gateway/gateway/internal/handler"
 	"github.com/saas-gateway/gateway/internal/middleware"
+	"github.com/saas-gateway/gateway/internal/ratelimit"
 )
 
 func main() {
@@ -21,6 +22,30 @@ func main() {
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
+	}
+
+	// Initialize Redis (optional for MVP - graceful degradation)
+	var rateLimitMiddleware *middleware.RateLimit
+	if cfg.RedisAddr != "" {
+		redisClient, err := ratelimit.NewRedisClient(ratelimit.RedisConfig{
+			Addr:     cfg.RedisAddr,
+			Password: cfg.RedisPassword,
+			DB:       cfg.RedisDB,
+			PoolSize: 10,
+		})
+		if err != nil {
+			log.Printf("⚠️  Warning: Failed to connect to Redis: %v", err)
+			log.Println("⚠️  Rate limiting will be disabled")
+		} else {
+			log.Println("✅ Connected to Redis for rate limiting")
+			limiter := ratelimit.NewRateLimiter(redisClient)
+			rateLimitMiddleware = middleware.NewRateLimit(limiter)
+
+			// Defer close
+			defer redisClient.Close()
+		}
+	} else {
+		log.Println("⚠️  REDIS_ADDR not set - rate limiting disabled")
 	}
 
 	// Initialize handlers
@@ -46,6 +71,12 @@ func main() {
 	// API routes (with authentication)
 	apiRouter := router.PathPrefix("/").Subrouter()
 	apiRouter.Use(authMiddleware.Middleware)
+
+	// Add rate limiting if Redis is available
+	if rateLimitMiddleware != nil {
+		apiRouter.Use(rateLimitMiddleware.Middleware)
+	}
+
 	apiRouter.PathPrefix("/").Handler(proxyHandler)
 
 	// Apply global middleware (order matters: recovery -> logging -> routes)
