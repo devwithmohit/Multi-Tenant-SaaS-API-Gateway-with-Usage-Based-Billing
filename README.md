@@ -67,13 +67,31 @@ Production-grade API Gateway for SaaS companies with rate limiting, usage tracki
   - Consumer group with manual offset commits
   - End-to-end test scripts
 
+### 🔄 Phase 4: Billing Engine (IN PROGRESS)
+
+- **Module 4.1**: Pricing Calculator ✅ COMPLETE
+
+  - Tiered pricing (Free, Starter, Growth, Business, Enterprise)
+  - Base charge + overage calculation
+  - Usage aggregator querying TimescaleDB
+  - Cron job for monthly billing (1st of month)
+  - Comprehensive unit tests (12 test functions)
+  - Database migration for billing tables
+
+- **Module 4.2**: Invoice Generator (NEXT)
+
+  - PDF invoice generation from billing records
+  - Email delivery to organization admins
+  - Stripe customer creation and payment processing
+  - Payment webhook handlers (success/failure/refund)
+
+- **Module 4.3**: Payment Processing
+  - Automatic payment retries (3 attempts)
+  - Failed payment notifications
+  - Subscription suspension for non-payment
+  - Refund processing
+
 ### 📋 Upcoming Phases
-
-**Phase 4: Billing Engine (NEXT)**
-
-- Tiered pricing calculator
-- Invoice generation
-- Stripe integration
 
 **Phase 5: Dashboard**
 

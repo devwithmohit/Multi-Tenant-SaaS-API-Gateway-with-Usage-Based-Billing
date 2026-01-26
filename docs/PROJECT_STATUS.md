@@ -6,7 +6,7 @@ Production-grade API Gateway with authentication, rate limiting, caching, and us
 
 **Repository:** devwithmohit/Multi-Tenant-SaaS-API-Gateway-with-Usage-Based-Billing
 **License:** MIT
-**Status:** 🚧 Active Development (Phase 3 in progress)
+**Status:** 🚧 Active Development (Phase 4 in progress)
 
 ---
 
@@ -102,6 +102,41 @@ Production-grade API Gateway with authentication, rate limiting, caching, and us
 
 ---
 
+### Phase 4: Billing Engine 🔄 IN PROGRESS
+
+**Module 4.1: Pricing Calculator** ✅ COMPLETE
+
+- ✅ Pricing models (5 predefined plans)
+  - Free: $0/100K (hard cap)
+  - Starter: $29/500K + $5/1M overage
+  - Growth: $99/2M + $4/1M overage
+  - Business: $299/10M + $3/1M overage
+  - Enterprise: $999/50M + $2/1M overage
+- ✅ Calculator with base + overage logic
+- ✅ Usage aggregator (queries TimescaleDB usage_monthly)
+- ✅ Cron job for monthly billing (1st at midnight)
+- ✅ Comprehensive unit tests (12 test functions)
+- ✅ Configuration management (dry-run mode)
+- ✅ Database migration 005 (billing tables)
+- ✅ Service documentation (billing-engine/README.md)
+- ✅ Module summary (MODULE_4.1_SUMMARY.md)
+
+**Module 4.2: Invoice Generator** 🎯 NEXT
+
+- PDF invoice generation from billing records
+- Email delivery to organization admins
+- Stripe customer creation and payment processing
+- Payment webhook handlers (success/failure/refund)
+
+**Module 4.3: Payment Processing**
+
+- Automatic payment retries (3 attempts)
+- Failed payment notifications
+- Subscription suspension for non-payment
+- Refund processing
+
+---
+
 ## 📁 Project Structure
 
 ```
@@ -122,16 +157,25 @@ Backend-projects/
 │   │   ├── docker-compose.yml       ✅ Kafka + Redis + usage-processor
 │   │   └── README.md
 │   │
-│   └── usage-processor/             ✅ Kafka Consumer (Phase 3.3)
-│       ├── cmd/consumer/            # Entry point
+│   ├── usage-processor/             ✅ Kafka Consumer (Phase 3.3)
+│   │   ├── cmd/consumer/            # Entry point
+│   │   ├── internal/
+│   │   │   ├── config/              ✅ Configuration
+│   │   │   └── processor/           ✅ Deduplicator + Writer
+│   │   ├── Dockerfile               ✅ Container image
+│   │   └── README.md
+│   │
+│   └── billing-engine/              ✅ Billing Calculator (Phase 4.1)
+│       ├── cmd/billing/             # Cron job entry point
 │       ├── internal/
+│       │   ├── aggregator/          ✅ Usage query (TimescaleDB)
 │       │   ├── config/              ✅ Configuration
-│       │   └── processor/           ✅ Deduplicator + Writer
-│       ├── Dockerfile               ✅ Container image
-│       └── README.md
+│       │   └── pricing/             ✅ Calculator + models + tests
+│       ├── go.mod                   ✅ Dependencies (lib/pq, cron)
+│       └── README.md                ✅ Service documentation
 │
 ├── db/                              # Database migrations
-│   ├── migrations/                  ✅ 4 migration files (+ 004 TimescaleDB)
+│   ├── migrations/                  ✅ 5 migration files (+ 005 Billing tables)
 │   ├── scripts/                     ✅ Setup scripts (Bash + PS)
 │   ├── docker-compose.yml           ✅ TimescaleDB container
 │   └── README.md
@@ -146,7 +190,9 @@ Backend-projects/
 │   ├── MODULE_2.2_SUMMARY.md        ✅ Cache implementation
 │   ├── MODULE_3.1_SUMMARY.md        ✅ Kafka streaming
 │   ├── MODULE_3.2_3.3_SUMMARY.md    ✅ TimescaleDB + Consumer
+│   ├── MODULE_4.1_SUMMARY.md        ✅ Pricing Calculator
 │   ├── PHASE2_COMPLETE.md           ✅ Phase 2 overview
+│   ├── PHASE3_QUICK_START.md        ✅ Phase 3 deployment
 │   ├── PROJECT_STATUS.md            ✅ Current status
 │   └── QUICK_REFERENCE.md           ✅ Quick start guide
 │
@@ -427,7 +473,8 @@ Copyright (c) 2026 devwithmohit
 
 ---
 
-**Last Updated:** January 26, 2026
-**Current Phase:** 3 (Usage Tracking) - ✅ COMPLETE
-**Next Module:** 4.1 - Billing Engine (Pricing Calculator)
+**Last Updated:** January 28, 2026
+**Current Phase:** 4 (Billing Engine) - 🔄 IN PROGRESS
+**Current Module:** 4.1 (Pricing Calculator) - ✅ COMPLETE
+**Next Module:** 4.2 - Invoice Generator
 **Status:** 🚀 Active Development
