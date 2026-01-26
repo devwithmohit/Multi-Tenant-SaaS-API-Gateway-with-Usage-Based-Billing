@@ -69,7 +69,7 @@ Production-grade API Gateway with authentication, rate limiting, caching, and us
 
 ---
 
-### Phase 3: Usage Tracking 🔄 IN PROGRESS
+### Phase 3: Usage Tracking ✅ COMPLETE
 
 **Module 3.1: Kafka Event Streaming** ✅ COMPLETE
 
@@ -82,19 +82,23 @@ Production-grade API Gateway with authentication, rate limiting, caching, and us
 - ✅ Docker Compose with Kafka + Zookeeper
 - ✅ Test scripts (Bash + PowerShell)
 
-**Module 3.2: TimescaleDB Analytics** 📋 NEXT
+**Module 3.2: TimescaleDB Analytics** ✅ COMPLETE
 
-- ⏳ TimescaleDB setup
-- ⏳ Kafka consumer implementation
-- ⏳ Hypertable for time-series data
-- ⏳ Continuous aggregates for billing
-- ⏳ Hourly/daily/monthly rollups
+- ✅ TimescaleDB container (PostgreSQL 16 + extension)
+- ✅ Hypertable with multi-dimensional partitioning
+- ✅ Continuous aggregates (hourly/daily/monthly)
+- ✅ Data retention policy (90 days)
+- ✅ Compression policy (7 days, 10-20x savings)
+- ✅ Migration 004 with indexes and functions
 
-**Module 3.3: Flink Stream Processing** 📋 PLANNED
+**Module 3.3: Kafka Consumer** ✅ COMPLETE
 
-- ⏳ Real-time aggregation
-- ⏳ Anomaly detection
-- ⏳ Usage alerts
+- ✅ Usage processor service (Go)
+- ✅ Deduplicator (5-minute window)
+- ✅ Batch writer (COPY protocol, 10K+ events/sec)
+- ✅ Consumer group with manual offset commits
+- ✅ Dual flush triggers (1000 events or 5s)
+- ✅ End-to-end test scripts
 
 ---
 
@@ -103,25 +107,33 @@ Production-grade API Gateway with authentication, rate limiting, caching, and us
 ```
 Backend-projects/
 ├── services/
-│   └── gateway/                     # API Gateway (Go 1.21)
-│       ├── cmd/server/              # Entry point
+│   ├── gateway/                     # API Gateway (Go 1.21)
+│   │   ├── cmd/server/              # Entry point
+│   │   ├── internal/
+│   │   │   ├── cache/               ✅ API key cache (Phase 2.2)
+│   │   │   ├── config/              ✅ Configuration loader
+│   │   │   ├── database/            ✅ PostgreSQL repository
+│   │   │   ├── events/              ✅ Kafka producer (Phase 3.1)
+│   │   │   ├── handler/             ✅ HTTP handlers
+│   │   │   ├── middleware/          ✅ Auth, logging, rate limit
+│   │   │   └── ratelimit/           ✅ Redis limiter (Phase 2.1)
+│   │   ├── pkg/models/              ✅ Domain models
+│   │   ├── scripts/                 ✅ Test scripts
+│   │   ├── docker-compose.yml       ✅ Kafka + Redis + usage-processor
+│   │   └── README.md
+│   │
+│   └── usage-processor/             ✅ Kafka Consumer (Phase 3.3)
+│       ├── cmd/consumer/            # Entry point
 │       ├── internal/
-│       │   ├── cache/               ✅ API key cache (Phase 2.2)
-│       │   ├── config/              ✅ Configuration loader
-│       │   ├── database/            ✅ PostgreSQL repository
-│       │   ├── events/              ✅ Kafka producer (Phase 3.1)
-│       │   ├── handler/             ✅ HTTP handlers
-│       │   ├── middleware/          ✅ Auth, logging, rate limit
-│       │   └── ratelimit/           ✅ Redis limiter (Phase 2.1)
-│       ├── pkg/models/              ✅ Domain models
-│       ├── scripts/                 ✅ Test scripts
-│       ├── docker-compose.yml       ✅ Kafka + Redis + Zookeeper
+│       │   ├── config/              ✅ Configuration
+│       │   └── processor/           ✅ Deduplicator + Writer
+│       ├── Dockerfile               ✅ Container image
 │       └── README.md
 │
 ├── db/                              # Database migrations
-│   ├── migrations/                  ✅ 4 migration files
+│   ├── migrations/                  ✅ 4 migration files (+ 004 TimescaleDB)
 │   ├── scripts/                     ✅ Setup scripts (Bash + PS)
-│   ├── docker-compose.yml           ✅ PostgreSQL container
+│   ├── docker-compose.yml           ✅ TimescaleDB container
 │   └── README.md
 │
 ├── tools/
@@ -133,8 +145,14 @@ Backend-projects/
 ├── docs/
 │   ├── MODULE_2.2_SUMMARY.md        ✅ Cache implementation
 │   ├── MODULE_3.1_SUMMARY.md        ✅ Kafka streaming
+│   ├── MODULE_3.2_3.3_SUMMARY.md    ✅ TimescaleDB + Consumer
 │   ├── PHASE2_COMPLETE.md           ✅ Phase 2 overview
+│   ├── PROJECT_STATUS.md            ✅ Current status
 │   └── QUICK_REFERENCE.md           ✅ Quick start guide
+│
+├── scripts/
+│   ├── test-pipeline.sh             ✅ E2E test (Bash)
+│   └── test-pipeline.ps1            ✅ E2E test (PowerShell)
 │
 ├── LICENSE                          ✅ MIT License
 └── README.md                        ✅ Project overview
@@ -144,23 +162,24 @@ Backend-projects/
 
 ## 🛠️ Tech Stack
 
-| Layer               | Technology      | Purpose                       |
-| ------------------- | --------------- | ----------------------------- |
-| **Gateway**         | Go 1.21         | High-performance HTTP proxy   |
-| **Routing**         | Gorilla Mux     | HTTP request routing          |
-| **Auth Cache**      | sync.Map        | In-memory key cache (15m TTL) |
-| **Rate Limiting**   | Redis 7.2 + Lua | Atomic token bucket           |
-| **Database**        | PostgreSQL 16   | Source of truth               |
-| **Event Streaming** | Kafka 7.5       | Usage event tracking          |
-| **Coordination**    | Zookeeper       | Kafka cluster management      |
-| **Migrations**      | golang-migrate  | Version-controlled schema     |
-| **CLI**             | Cobra           | API key management            |
-| **Containers**      | Docker Compose  | Local development             |
+| Layer               | Technology         | Purpose                       |
+| ------------------- | ------------------ | ----------------------------- |
+| **Gateway**         | Go 1.21            | High-performance HTTP proxy   |
+| **Routing**         | Gorilla Mux        | HTTP request routing          |
+| **Auth Cache**      | sync.Map           | In-memory key cache (15m TTL) |
+| **Rate Limiting**   | Redis 7.2 + Lua    | Atomic token bucket           |
+| **Database**        | PostgreSQL 16      | Source of truth               |
+| **Time-Series DB**  | TimescaleDB        | Usage analytics (hypertables) |
+| **Event Streaming** | Kafka 7.5          | Usage event tracking          |
+| **Stream Consumer** | confluent-kafka-go | Consumer with deduplication   |
+| **Coordination**    | Zookeeper          | Kafka cluster management      |
+| **Migrations**      | golang-migrate     | Version-controlled schema     |
+| **CLI**             | Cobra              | API key management            |
+| **Containers**      | Docker Compose     | Local development             |
 
 **Future Additions:**
 
-- TimescaleDB (time-series analytics)
-- Flink (stream processing)
+- Flink (real-time stream processing)
 - Prometheus (metrics)
 - Grafana (dashboards)
 - Kubernetes (production deployment)
@@ -409,6 +428,6 @@ Copyright (c) 2026 devwithmohit
 ---
 
 **Last Updated:** January 26, 2026
-**Current Phase:** 3 (Usage Tracking)
-**Next Module:** 3.2 - TimescaleDB Analytics
+**Current Phase:** 3 (Usage Tracking) - ✅ COMPLETE
+**Next Module:** 4.1 - Billing Engine (Pricing Calculator)
 **Status:** 🚀 Active Development

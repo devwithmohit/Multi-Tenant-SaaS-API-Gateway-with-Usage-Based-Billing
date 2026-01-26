@@ -105,6 +105,31 @@ services:
     profiles:
       - tools # Only start with: docker-compose --profile tools up
 
+  # Usage Processor (Kafka → TimescaleDB)
+  usage-processor:
+    build:
+      context: ../usage-processor
+      dockerfile: Dockerfile
+    container_name: saas-gateway-usage-processor
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_BROKERS: kafka:29092
+      KAFKA_GROUP_ID: usage-processor-group
+      KAFKA_TOPIC: usage-events
+      KAFKA_AUTO_OFFSET_RESET: earliest
+      DATABASE_URL: postgresql://gateway_user:dev_password_change_in_prod@host.docker.internal:5432/saas_gateway?sslmode=disable
+      BATCH_SIZE: 1000
+      BATCH_TIMEOUT: 5s
+      DEDUP_WINDOW: 5m
+      DB_MAX_CONNECTIONS: 20
+      LOG_LEVEL: info
+    networks:
+      - gateway-network
+    restart: unless-stopped
+    # Note: Requires TimescaleDB running on host (port 5432)
+    # Start with: docker-compose up usage-processor
+
 volumes:
   zookeeper-data:
     driver: local

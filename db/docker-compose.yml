@@ -1,9 +1,10 @@
 version: "3.8"
 
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: saas-gateway-postgres
+  # TimescaleDB (PostgreSQL 16 + TimescaleDB extension)
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: saas-gateway-timescaledb
     environment:
       POSTGRES_DB: saas_gateway
       POSTGRES_USER: gateway_user
@@ -12,7 +13,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - timescale_data:/var/lib/postgresql/data
       - ./init:/docker-entrypoint-initdb.d # Optional: initial setup scripts
     networks:
       - gateway-network
@@ -22,6 +23,7 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    command: postgres -c shared_preload_libraries=timescaledb -c max_connections=200
 
   # Optional: pgAdmin for database management
   pgadmin:
@@ -38,13 +40,13 @@ services:
     networks:
       - gateway-network
     depends_on:
-      - postgres
+      - timescaledb
     restart: unless-stopped
     profiles:
       - tools # Only start with: docker-compose --profile tools up
 
 volumes:
-  postgres_data:
+  timescale_data:
     driver: local
   pgadmin_data:
     driver: local

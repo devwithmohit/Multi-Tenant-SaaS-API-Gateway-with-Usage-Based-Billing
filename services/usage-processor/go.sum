@@ -1,0 +1,4 @@
+github.com/confluentinc/confluent-kafka-go/v2 v2.3.0 h1:icQV4zgOEK1D+q5U8n06czLRC0FKlT8RdE9r8/w+KfM=
+github.com/confluentinc/confluent-kafka-go/v2 v2.3.0/go.mod h1:t/gnp4yDMDudzP2FbdG/8MkLvzYp8fvOz3I7bJ1r1mU=
+github.com/lib/pq v1.10.9 h1:YXG7RB+JIjhP29X+OtkiDnYaXQwpS4JEWq7dtCCRUEw=
+github.com/lib/pq v1.10.9/go.mod h1:AlVN5x4E4T544tWzH6hKfbfQvm3HdbOxrmggDNAPY9o=
