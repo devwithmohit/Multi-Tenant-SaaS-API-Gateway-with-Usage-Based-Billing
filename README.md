@@ -42,19 +42,29 @@ Production-grade API Gateway for SaaS companies with rate limiting, usage tracki
   - Background refresh every 15 minutes
   - Thread-safe using sync.Map
 
-### 🔄 Phase 3: Usage Tracking (NEXT)
+### ✅ Phase 3: Usage Tracking (IN PROGRESS)
 
-- **Module 3.1**: Kafka Event Streaming
+- **Module 3.1**: Kafka Event Streaming ✅ COMPLETE
 
-  - Usage event emission
-  - Event schema definition
-  - Producer implementation
+  - Usage event emission after each request
+  - Event buffering with 100-event batches or 500ms flush
+  - Kafka producer with snappy compression
+  - Graceful shutdown with event flushing
+  - Billable request tracking (2xx, 4xx = billable, 5xx = not)
 
-- **Module 3.2**: TimescaleDB Analytics
-  - Time-series storage
-  - Usage aggregation
-  - Historical analysis
-- Flink processing pipeline
+- **Module 3.2**: TimescaleDB Analytics (NEXT)
+
+  - Time-series hypertable for usage events
+  - Continuous aggregates for billing
+  - Hourly/daily/monthly usage rollups
+  - Historical analysis and reporting
+
+- **Module 3.3**: Flink Stream Processing
+  - Real-time usage aggregation
+  - Anomaly detection
+  - Usage alerts and notifications
+
+### 📋 Upcoming Phases
 
 **Phase 4: Billing Engine**
 

@@ -15,6 +15,7 @@ import (
 	"github.com/saas-gateway/gateway/internal/cache"
 	"github.com/saas-gateway/gateway/internal/config"
 	"github.com/saas-gateway/gateway/internal/database"
+	"github.com/saas-gateway/gateway/internal/events"
 	"github.com/saas-gateway/gateway/internal/handler"
 	"github.com/saas-gateway/gateway/internal/middleware"
 	"github.com/saas-gateway/gateway/internal/ratelimit"
@@ -89,9 +90,34 @@ func main() {
 		log.Println("⚠️  REDIS_ADDR not set - rate limiting disabled")
 	}
 
+	// Initialize Kafka event producer (optional - graceful degradation)
+	var eventProducer *events.EventProducer
+	eventCfg, err := events.LoadConfig()
+	if err != nil {
+		log.Printf("⚠️  Warning: Failed to load Kafka config: %v", err)
+		log.Println("⚠️  Usage event tracking will be disabled")
+	} else if eventCfg.Enabled {
+		eventProducer, err = events.NewEventProducer(events.ProducerConfig{
+			Brokers:       eventCfg.Brokers,
+			Topic:         eventCfg.Topic,
+			BatchSize:     eventCfg.BatchSize,
+			FlushInterval: eventCfg.FlushInterval,
+			BufferSize:    eventCfg.BufferSize,
+		})
+		if err != nil {
+			log.Printf("⚠️  Warning: Failed to create Kafka producer: %v", err)
+			log.Println("⚠️  Usage event tracking will be disabled")
+		} else {
+			log.Println("✅ Connected to Kafka for usage tracking")
+			defer eventProducer.Close()
+		}
+	} else {
+		log.Println("ℹ️  Kafka disabled - usage event tracking disabled")
+	}
+
 	// Initialize handlers
 	healthHandler := handler.NewHealth()
-	proxyHandler, err := handler.NewProxy(cfg)
+	proxyHandler, err := handler.NewProxy(cfg, eventProducer)
 	if err != nil {
 		log.Fatalf("Failed to initialize proxy handler: %v", err)
 	}

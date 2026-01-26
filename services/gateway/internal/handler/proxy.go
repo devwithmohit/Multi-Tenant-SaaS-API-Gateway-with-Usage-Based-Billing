@@ -10,20 +10,23 @@ import (
 	"time"
 
 	"github.com/saas-gateway/gateway/internal/config"
+	"github.com/saas-gateway/gateway/internal/events"
 	"github.com/saas-gateway/gateway/internal/middleware"
 )
 
 // Proxy handles reverse proxying to backend services
 type Proxy struct {
-	config  *config.Config
-	proxies map[string]*httputil.ReverseProxy
+	config        *config.Config
+	proxies       map[string]*httputil.ReverseProxy
+	eventProducer *events.EventProducer
 }
 
 // NewProxy creates a new proxy handler
-func NewProxy(cfg *config.Config) (*Proxy, error) {
+func NewProxy(cfg *config.Config, eventProducer *events.EventProducer) (*Proxy, error) {
 	p := &Proxy{
-		config:  cfg,
-		proxies: make(map[string]*httputil.ReverseProxy),
+		config:        cfg,
+		proxies:       make(map[string]*httputil.ReverseProxy),
+		eventProducer: eventProducer,
 	}
 
 	// Create reverse proxies for each backend
@@ -72,6 +75,9 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Record start time for response time calculation
+	startTime := time.Now()
+
 	// Determine target service from path
 	// Format: /service-name/path or just /path (uses default backend)
 	serviceName := p.extractServiceName(r.URL.Path)
@@ -92,8 +98,32 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Create response writer wrapper to capture status code
+	rw := &responseWriter{
+		ResponseWriter: w,
+		statusCode:     http.StatusOK, // Default
+	}
+
 	// Proxy the request
-	proxy.ServeHTTP(w, r)
+	proxy.ServeHTTP(rw, r)
+
+	// Calculate response time
+	responseTime := time.Since(startTime).Milliseconds()
+
+	// Emit usage event to Kafka (async, non-blocking)
+	if p.eventProducer != nil {
+		p.eventProducer.RecordUsage(events.UsageEvent{
+			RequestID:      reqCtx.RequestID,
+			OrganizationID: reqCtx.APIKey.OrganizationID,
+			APIKeyID:       reqCtx.APIKey.ID.String(),
+			Endpoint:       r.URL.Path,
+			Method:         r.Method,
+			StatusCode:     rw.statusCode,
+			ResponseTimeMs: responseTime,
+			Timestamp:      startTime,
+			Billable:       p.isBillable(rw.statusCode),
+		})
+	}
 }
 
 // extractServiceName extracts the service name from the URL path
@@ -160,4 +190,22 @@ func (p *Proxy) respondError(w http.ResponseWriter, statusCode int, message stri
 		},
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	})
+}
+
+// responseWriter wraps http.ResponseWriter to capture status code
+type responseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (rw *responseWriter) WriteHeader(code int) {
+	rw.statusCode = code
+	rw.ResponseWriter.WriteHeader(code)
+}
+
+// isBillable determines if a request should be billed based on status code
+func (p *Proxy) isBillable(statusCode int) bool {
+	// Bill for successful requests (2xx) and client errors (4xx)
+	// Don't bill for server errors (5xx) as they're our fault
+	return statusCode >= 200 && statusCode < 500
 }
