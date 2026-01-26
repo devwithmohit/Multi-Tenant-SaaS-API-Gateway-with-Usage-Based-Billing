@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log"
 	"net/http"
@@ -11,10 +12,14 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/saas-gateway/gateway/internal/cache"
 	"github.com/saas-gateway/gateway/internal/config"
+	"github.com/saas-gateway/gateway/internal/database"
 	"github.com/saas-gateway/gateway/internal/handler"
 	"github.com/saas-gateway/gateway/internal/middleware"
 	"github.com/saas-gateway/gateway/internal/ratelimit"
+
+	_ "github.com/lib/pq"
 )
 
 func main() {
@@ -23,6 +28,42 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
+
+	// Initialize PostgreSQL
+	if cfg.DatabaseURL == "" {
+		log.Fatalf("DATABASE_URL environment variable is required")
+	}
+
+	db, err := sql.Open("postgres", cfg.DatabaseURL)
+	if err != nil {
+		log.Fatalf("Failed to open database connection: %v", err)
+	}
+	defer db.Close()
+
+	// Configure connection pool
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(5 * time.Minute)
+
+	// Test database connection
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := db.PingContext(ctx); err != nil {
+		log.Fatalf("Failed to ping database: %v", err)
+	}
+	log.Println("✅ Connected to PostgreSQL")
+
+	// Initialize repository
+	repo := database.NewRepository(db)
+
+	// Initialize API key cache
+	keyCache := cache.NewAPIKeyCache(15 * time.Minute)
+	log.Println("✅ Initialized API key cache (TTL: 15m)")
+
+	// Start background cache refresh
+	refreshManager := cache.NewRefreshManager(keyCache, repo, 15*time.Minute)
+	go refreshManager.Start()
+	defer refreshManager.Stop()
 
 	// Initialize Redis (optional for MVP - graceful degradation)
 	var rateLimitMiddleware *middleware.RateLimit
@@ -56,7 +97,7 @@ func main() {
 	}
 
 	// Initialize middleware
-	authMiddleware := middleware.NewAuth(cfg)
+	authMiddleware := middleware.NewAuth(cfg, keyCache, repo)
 	loggerMiddleware := middleware.NewLogger()
 	recoveryMiddleware := middleware.NewRecovery()
 

@@ -2,13 +2,18 @@ package middleware
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/saas-gateway/gateway/internal/cache"
 	"github.com/saas-gateway/gateway/internal/config"
+	"github.com/saas-gateway/gateway/internal/database"
 	"github.com/saas-gateway/gateway/pkg/models"
 )
 
@@ -21,11 +26,17 @@ const (
 // Auth validates API keys from the Authorization header
 type Auth struct {
 	config *config.Config
+	cache  *cache.APIKeyCache
+	repo   *database.Repository
 }
 
 // NewAuth creates a new authentication middleware
-func NewAuth(cfg *config.Config) *Auth {
-	return &Auth{config: cfg}
+func NewAuth(cfg *config.Config, keyCache *cache.APIKeyCache, repo *database.Repository) *Auth {
+	return &Auth{
+		config: cfg,
+		cache:  keyCache,
+		repo:   repo,
+	}
 }
 
 // Middleware validates the API key and adds request context
@@ -45,35 +56,49 @@ func (a *Auth) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
-		apiKeyStr := parts[1]
+	apiKeyStr := parts[1]
 
-		// Validate API key (temporary hardcoded validation)
-		keyConfig, valid := a.config.APIKeys[apiKeyStr]
-		if !valid {
+	// Hash the API key (same as stored in database)
+	keyHash := hashAPIKey(apiKeyStr)
+
+	// Try to get from cache first
+	cachedKey, found := a.cache.Get(keyHash)
+	if !found {
+		// Cache miss - query database
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+
+		var err error
+		cachedKey, err = a.repo.GetAPIKey(ctx, keyHash)
+		if err != nil {
+			log.Printf("[Auth] ERROR: Database query failed: %v", err)
+			a.respondError(w, http.StatusInternalServerError, "authentication service temporarily unavailable")
+			return
+		}
+
+		if cachedKey == nil {
+			// Invalid API key (not found or revoked)
 			a.respondError(w, http.StatusForbidden, "invalid API key")
 			return
 		}
 
-		// Create API key model
-		now := time.Now()
-		apiKey := &models.APIKey{
-			ID:             uuid.New(),
-			Key:            keyConfig.Key,
-			OrganizationID: keyConfig.OrganizationID,
-			PlanTier:       keyConfig.PlanTier,
-			CreatedAt:      now,
-			ExpiresAt:      nil,
-			IsRevoked:      false,
-			LastUsedAt:     &now,
-		}
+		// Store in cache for future requests
+		a.cache.Set(keyHash, cachedKey)
+		log.Printf("[Auth] Cache miss - loaded key for org: %s", cachedKey.OrganizationID)
+	}
 
-		// Check if key is valid (not revoked, not expired)
-		if !apiKey.IsValid() {
-			a.respondError(w, http.StatusForbidden, "API key is revoked or expired")
-			return
-		}
-
-		// Create request context
+	// Create API key model
+	now := time.Now()
+	apiKey := &models.APIKey{
+		ID:             uuid.New(),
+		Key:            apiKeyStr,
+		OrganizationID: cachedKey.OrganizationID,
+		PlanTier:       "free", // TODO: Get from database
+		CreatedAt:      now,
+		ExpiresAt:      nil,
+		IsRevoked:      false,
+		LastUsedAt:     &now,
+	}		// Create request context
 		reqCtx := &models.RequestContext{
 			APIKey:    apiKey,
 			RequestID: uuid.New().String(),
@@ -127,4 +152,10 @@ func getClientIP(r *http.Request) string {
 		ip = ip[:idx]
 	}
 	return ip
+}
+
+// hashAPIKey creates a SHA-256 hash of the API key
+func hashAPIKey(apiKey string) string {
+	hash := sha256.Sum256([]byte(apiKey))
+	return hex.EncodeToString(hash[:])
 }

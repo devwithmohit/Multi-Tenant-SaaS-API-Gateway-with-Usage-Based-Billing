@@ -1,5 +1,7 @@
 # Multi-Tenant SaaS API Gateway with Usage-Based Billing
 
+🚧 **This project is currently under active development. Documentation and features are subject to change.**
+
 Production-grade API Gateway for SaaS companies with rate limiting, usage tracking, and automated billing.
 
 ## Project Status
@@ -25,27 +27,33 @@ Production-grade API Gateway for SaaS companies with rate limiting, usage tracki
   - Secure key generation
   - Organization management
 
-### ✅ Phase 2: Rate Limiting (COMPLETE)
+### ✅ Phase 2: Rate Limiting & Caching (COMPLETE)
 
 - **Module 2.1**: Redis Rate Limiter
+
   - Token bucket algorithm
   - Atomic Lua scripts
   - Multi-dimensional limits (minute + day)
   - Burst traffic handling
 
-### 🔄 Phase 2: In Progress
+- **Module 2.2**: API Key Cache
+  - In-memory cache with 15-minute TTL
+  - PostgreSQL fallback on cache miss
+  - Background refresh every 15 minutes
+  - Thread-safe using sync.Map
 
-- **Module 2.2**: API Key Cache (NEXT)
-  - Redis caching layer
-  - PostgreSQL integration
-  - Cache invalidation via pub/sub
+### 🔄 Phase 3: Usage Tracking (NEXT)
 
-### 📋 Upcoming Phases
+- **Module 3.1**: Kafka Event Streaming
 
-**Phase 3: Usage Tracking**
+  - Usage event emission
+  - Event schema definition
+  - Producer implementation
 
-- Kafka event streaming
-- TimescaleDB analytics
+- **Module 3.2**: TimescaleDB Analytics
+  - Time-series storage
+  - Usage aggregation
+  - Historical analysis
 - Flink processing pipeline
 
 **Phase 4: Billing Engine**

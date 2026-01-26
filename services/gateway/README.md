@@ -1,10 +1,13 @@
 # API Gateway - Multi-Tenant SaaS
 
-Multi-tenant SaaS API Gateway with authentication, rate limiting, and reverse proxy capabilities.
+Multi-tenant SaaS API Gateway with authentication, rate limiting, caching, and reverse proxy capabilities.
 
 ## Features
 
 - ✅ **API Key authentication** via `Authorization: Bearer <key>` header
+- ✅ **In-memory cache** for API keys (15-minute TTL, <1ms lookups)
+- ✅ **PostgreSQL integration** with automatic fallback on cache miss
+- ✅ **Background cache refresh** every 15 minutes
 - ✅ **Redis-backed rate limiting** with token bucket algorithm
 - ✅ **Reverse proxy** to configurable backend services
 - ✅ **Structured JSON logging** with request tracing
@@ -23,25 +26,40 @@ Client Request
     ↓
 [Logging Middleware] → Structured JSON logs
     ↓
-[Auth Middleware] → Validates API key
+[Auth Middleware] → Validates API key (cache-first, PostgreSQL fallback)
     ↓
 [Rate Limit Middleware] → Redis token bucket (Phase 2)
     ↓
 [Proxy Handler] → Routes to backend service
+    ↓
+Backend Response
     ↓
 Backend Service
 ```
 
 ## Quick Start
 
-### 1. Install Dependencies
+### 1. Start PostgreSQL
 
 ```bash
-cd services/gateway
-go mod download
+cd ../../db/
+docker-compose up -d
+
+# Run migrations (Windows)
+./scripts/setup.ps1
+
+# Or on Linux/macOS
+# bash scripts/setup.sh
 ```
 
-### 2. Configure Environment
+### 2. Start Redis (for rate limiting)
+
+```bash
+cd ../services/gateway/
+docker-compose up -d redis
+```
+
+### 3. Configure Environment
 
 Create a `.env` file:
 
@@ -55,24 +73,55 @@ Edit `.env` with your configuration:
 GATEWAY_PORT=8080
 LOG_LEVEL=info
 BACKEND_URLS=api-service=http://localhost:3000
+
+# PostgreSQL connection (required for Phase 2+)
+DATABASE_URL=postgresql://gateway_user:dev_password_change_in_prod@localhost:5432/saas_gateway?sslmode=disable
+
+# Redis configuration (optional - graceful degradation)
+REDIS_ADDR=localhost:6379
+REDIS_PASSWORD=
+REDIS_DB=0
+
+# Legacy API keys (will be replaced by database keys)
 VALID_API_KEYS=sk_test_abc123:org_1:premium
 ```
 
-### 3. Start the Gateway
+### 4. Generate Test API Key
 
 ```bash
-# Load environment variables and run
-export $(cat .env | xargs) && go run cmd/server/main.go
+cd ../../tools/keygen/
+go build -o keygen.exe
+
+# Set database URL
+$env:DATABASE_URL="postgresql://gateway_user:dev_password_change_in_prod@localhost:5432/saas_gateway?sslmode=disable"
+
+# Create a test key
+./keygen.exe create --org-id=00000000-0000-0000-0000-000000000001 --name="Test API Key"
+
+# Save the generated key (e.g., sk_test_abc123...)
 ```
 
-Or use a tool like `godotenv`:
+### 5. Start the Gateway
 
 ```bash
-go install github.com/joho/godotenv/cmd/godotenv@latest
-godotenv -f .env go run cmd/server/main.go
+cd ../../services/gateway/
+
+# Run with environment variables
+$env:DATABASE_URL="postgresql://..."
+go run cmd/server/main.go
 ```
 
-### 5. Test the Gateway
+**Expected startup logs:**
+
+```
+✅ Connected to PostgreSQL
+✅ Initialized API key cache (TTL: 15m)
+[RefreshManager] Starting background cache refresh (interval: 15m0s)
+✅ Connected to Redis for rate limiting
+🚀 Gateway server starting on http://localhost:8080
+```
+
+### 6. Test the Gateway
 
 **Health Check:**
 
