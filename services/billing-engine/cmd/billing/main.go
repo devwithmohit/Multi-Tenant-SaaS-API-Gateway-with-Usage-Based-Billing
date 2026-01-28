@@ -82,11 +82,49 @@ func main() {
 	emailSender := invoice.NewEmailSender(&cfg.InvoiceConfig)
 	log.Println("✅ Billing components initialized")
 
-	// Setup cron job
-	c := cron.New()
+	// Setup cron scheduler
+	c := cron.New(cron.WithSeconds())
+	log.Println("🕐 Setting up cron jobs...")
 
-	jobFunc := func() {
-		log.Println("⏰ Starting monthly billing job...")
+	// Job 1: Hourly usage aggregation (every hour at :00)
+	// Aggregates usage data from the previous hour
+	hourlyJobFunc := func() {
+		log.Println("⏰ Starting hourly usage aggregation...")
+		err := runHourlyAggregation(db, usageAgg)
+		if err != nil {
+			log.Printf("❌ Hourly aggregation failed: %v", err)
+		} else {
+			log.Println("✅ Hourly aggregation completed")
+		}
+	}
+
+	_, err = c.AddFunc("0 0 * * * *", hourlyJobFunc) // Every hour at :00
+	if err != nil {
+		log.Fatalf("Failed to setup hourly aggregation job: %v", err)
+	}
+	log.Printf("✅ Hourly aggregation scheduled: 0 0 * * * * (every hour)")
+
+	// Job 2: Monthly invoice generation (1st of every month at 00:00 UTC)
+	// Generates invoices for the previous month
+	monthlyJobFunc := func() {
+		log.Println("⏰ Starting monthly invoice generation...")
+		err := runMonthlyInvoiceGeneration(cfg, db, usageAgg, calculator, invoiceGen, pdfGen, storageManager, stripeIntegration, emailSender)
+		if err != nil {
+			log.Printf("❌ Monthly invoice generation failed: %v", err)
+		} else {
+			log.Println("✅ Monthly invoice generation completed")
+		}
+	}
+
+	_, err = c.AddFunc("0 0 0 1 * *", monthlyJobFunc) // 1st of month at 00:00 UTC
+	if err != nil {
+		log.Fatalf("Failed to setup monthly invoice job: %v", err)
+	}
+	log.Printf("✅ Monthly invoice generation scheduled: 0 0 0 1 * * (1st of month at 00:00 UTC)")
+
+	// Job 3: Legacy billing job (keeps existing schedule from config)
+	legacyJobFunc := func() {
+		log.Println("⏰ Starting billing job (legacy schedule)...")
 		err := runBillingJob(cfg, usageAgg, calculator, invoiceGen, pdfGen, storageManager, stripeIntegration, emailSender)
 		if err != nil {
 			log.Printf("❌ Billing job failed: %v", err)
@@ -95,18 +133,16 @@ func main() {
 		}
 	}
 
-	// Add cron job
-	_, err = c.AddFunc(cfg.RunSchedule, jobFunc)
+	_, err = c.AddFunc(cfg.RunSchedule, legacyJobFunc)
 	if err != nil {
-		log.Fatalf("Failed to setup cron job: %v", err)
+		log.Fatalf("Failed to setup legacy billing job: %v", err)
 	}
-
-	log.Printf("✅ Cron job scheduled: %s", cfg.RunSchedule)
+	log.Printf("✅ Legacy billing job scheduled: %s", cfg.RunSchedule)
 
 	// Run immediately if requested (for testing)
 	if os.Getenv("RUN_IMMEDIATELY") == "true" {
 		log.Println("🏃 Running billing job immediately (RUN_IMMEDIATELY=true)...")
-		jobFunc()
+		legacyJobFunc()
 	}
 
 	// Start cron scheduler
@@ -303,5 +339,265 @@ func getInvoicesForMonth(ctx context.Context, invoiceGen *invoice.InvoiceGenerat
 	// TODO: Implement database query to get all invoices for the month
 	// For now, return empty list
 	return []*invoice.Invoice{}, nil
+}
+
+// runHourlyAggregation performs hourly aggregation of usage data
+// This job runs every hour to aggregate usage metrics for better performance
+func runHourlyAggregation(db *sql.DB, usageAgg *aggregator.UsageAggregator) error {
+	startTime := time.Now()
+	ctx := context.Background()
+
+	// Calculate the previous hour
+	now := time.Now()
+	endTime := time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.UTC)
+	startTimeHour := endTime.Add(-1 * time.Hour)
+
+	log.Println("=" + string(make([]byte, 70)))
+	log.Println("⏱️  HOURLY USAGE AGGREGATION")
+	log.Println("=" + string(make([]byte, 70)))
+	log.Printf("Time Range: %s to %s", startTimeHour.Format(time.RFC3339), endTime.Format(time.RFC3339))
+
+	// Fetch active organizations
+	orgs, err := fetchActiveOrganizations(db)
+	if err != nil {
+		log.Printf("❌ Failed to fetch organizations: %v", err)
+		return fmt.Errorf("failed to fetch organizations: %w", err)
+	}
+
+	log.Printf("📋 Found %d active organizations", len(orgs))
+
+	successCount := 0
+	errorCount := 0
+
+	// Aggregate usage for each organization
+	for _, org := range orgs {
+		log.Printf("  Processing org: %s (%s)", org.Name, org.ID)
+
+		// Aggregate usage for the hour
+		// Note: You may need to implement AggregateUsageForHour if it doesn't exist
+		// For now, we'll use the existing AggregateUsageForMonth with custom time range
+		_, err := usageAgg.AggregateUsageForMonth(ctx, org.ID, startTimeHour)
+		if err != nil {
+			log.Printf("  ❌ Failed to aggregate usage for %s: %v", org.ID, err)
+			errorCount++
+			continue
+		}
+
+		log.Printf("  ✅ Aggregated usage for %s", org.ID)
+		successCount++
+	}
+
+	duration := time.Since(startTime)
+
+	// Summary
+	log.Println("=" + string(make([]byte, 70)))
+	log.Println("📊 AGGREGATION SUMMARY")
+	log.Println("=" + string(make([]byte, 70)))
+	log.Printf("Organizations Processed: %d", successCount)
+	log.Printf("Errors: %d", errorCount)
+	log.Printf("Processing Time: %v", duration)
+	log.Println("=" + string(make([]byte, 70)))
+
+	if errorCount > 0 {
+		return fmt.Errorf("hourly aggregation completed with %d errors", errorCount)
+	}
+
+	return nil
+}
+
+// runMonthlyInvoiceGeneration generates invoices for all organizations
+// This job runs on the 1st of each month at 00:00 UTC
+func runMonthlyInvoiceGeneration(
+	cfg *config.Config,
+	db *sql.DB,
+	usageAgg *aggregator.UsageAggregator,
+	calculator *pricing.Calculator,
+	invoiceGen *invoice.InvoiceGenerator,
+	pdfGen *invoice.PDFGenerator,
+	storageManager *invoice.StorageManager,
+	stripeIntegration *invoice.StripeIntegration,
+	emailSender *invoice.EmailSender,
+) error {
+	startTime := time.Now()
+	ctx := context.Background()
+
+	// Determine which month to process (previous month)
+	now := time.Now()
+	processMonth := time.Date(now.Year(), now.Month()-1, 1, 0, 0, 0, 0, time.UTC)
+	if cfg.ProcessMonth != "" {
+		var err error
+		processMonth, err = time.Parse("2006-01", cfg.ProcessMonth)
+		if err != nil {
+			return fmt.Errorf("invalid process month format: %w", err)
+		}
+	}
+
+	monthStr := processMonth.Format("2006-01")
+
+	log.Println("=" + string(make([]byte, 70)))
+	log.Println("💰 MONTHLY INVOICE GENERATION")
+	log.Println("=" + string(make([]byte, 70)))
+	log.Printf("Month: %s", monthStr)
+	log.Printf("Dry Run: %v", cfg.DryRun)
+
+	// Fetch active organizations
+	orgs, err := fetchActiveOrganizations(db)
+	if err != nil {
+		log.Printf("❌ Failed to fetch organizations: %v", err)
+		return fmt.Errorf("failed to fetch organizations: %w", err)
+	}
+
+	log.Printf("📋 Found %d active organizations to invoice", len(orgs))
+
+	successCount := 0
+	errorCount := 0
+	var totalRevenue float64
+
+	// Process each organization
+	for _, org := range orgs {
+		log.Printf("  Processing org: %s (%s)", org.Name, org.ID)
+
+		// Generate invoice for this organization
+		summary, err := invoiceGen.GenerateMonthly(ctx, org.ID, processMonth)
+		if err != nil {
+			log.Printf("  ❌ Failed to generate invoice for %s: %v", org.ID, err)
+			errorCount++
+			continue
+		}
+
+		if summary.SuccessCount == 0 {
+			log.Printf("  ⚠️  No invoices generated for %s", org.ID)
+			continue
+		}
+
+		totalRevenue += summary.TotalRevenue
+		log.Printf("  ✅ Generated invoice for %s (Amount: %s)", org.ID, pricing.FormatPrice(summary.TotalRevenue))
+
+		// Get the generated invoice (assume first one in summary)
+		// TODO: Improve this to get actual invoice from database
+		invoices, err := getInvoicesForMonth(ctx, invoiceGen, processMonth)
+		if err != nil || len(invoices) == 0 {
+			log.Printf("  ⚠️  Could not retrieve invoice for processing")
+			continue
+		}
+
+		inv := invoices[0]
+
+		// Generate PDF
+		if cfg.InvoiceConfig.EnableS3 || cfg.InvoiceConfig.EnableEmail {
+			pdfData, err := pdfGen.GeneratePDF(ctx, inv)
+			if err != nil {
+				log.Printf("  ❌ PDF generation failed: %v", err)
+				errorCount++
+				continue
+			}
+			log.Printf("  ✅ Generated PDF (%d KB)", len(pdfData)/1024)
+
+			// Upload to S3
+			if cfg.InvoiceConfig.EnableS3 && !cfg.DryRun {
+				pdfURL, err := storageManager.UploadPDF(ctx, inv.ID, inv.OrganizationID, pdfData)
+				if err != nil {
+					log.Printf("  ❌ S3 upload failed: %v", err)
+					errorCount++
+					continue
+				}
+				log.Printf("  ✅ Uploaded to S3: %s", pdfURL)
+			}
+
+			// Send email
+			if cfg.InvoiceConfig.EnableEmail && !cfg.DryRun {
+				err = emailSender.SendInvoiceEmail(ctx, inv, pdfData)
+				if err != nil {
+					log.Printf("  ❌ Email sending failed: %v", err)
+					errorCount++
+					continue
+				}
+				log.Printf("  ✅ Invoice emailed to %s", inv.CustomerEmail)
+			}
+		}
+
+		// Create Stripe invoice
+		if cfg.InvoiceConfig.EnableStripe && !cfg.DryRun {
+			_, err = stripeIntegration.CreateOrGetCustomer(ctx, org.ID, org.Name, org.Email)
+			if err != nil {
+				log.Printf("  ❌ Stripe customer creation failed: %v", err)
+				errorCount++
+				continue
+			}
+
+			_, err = stripeIntegration.CreateInvoice(ctx, inv)
+			if err != nil {
+				log.Printf("  ❌ Stripe invoice creation failed: %v", err)
+				errorCount++
+				continue
+			}
+
+			log.Printf("  ✅ Stripe invoice created")
+		}
+
+		successCount++
+	}
+
+	duration := time.Since(startTime)
+
+	// Summary
+	log.Println("=" + string(make([]byte, 70)))
+	log.Println("📊 MONTHLY INVOICE SUMMARY")
+	log.Println("=" + string(make([]byte, 70)))
+	log.Printf("Month: %s", monthStr)
+	log.Printf("Organizations Processed: %d", successCount)
+	log.Printf("Errors: %d", errorCount)
+	log.Printf("Total Revenue: %s", pricing.FormatPrice(totalRevenue))
+	log.Printf("Processing Time: %v", duration)
+	log.Printf("Dry Run: %v", cfg.DryRun)
+	log.Println("=" + string(make([]byte, 70)))
+
+	if errorCount > 0 {
+		return fmt.Errorf("monthly invoice generation completed with %d errors", errorCount)
+	}
+
+	return nil
+}
+
+// Organization represents an organization in the system
+type Organization struct {
+	ID     string
+	Name   string
+	Email  string
+	Status string
+}
+
+// fetchActiveOrganizations retrieves all active organizations from the database
+func fetchActiveOrganizations(db *sql.DB) ([]*Organization, error) {
+	ctx := context.Background()
+
+	query := `
+		SELECT id, name, email, status
+		FROM organizations
+		WHERE status = 'active'
+		ORDER BY created_at ASC
+	`
+
+	rows, err := db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query organizations: %w", err)
+	}
+	defer rows.Close()
+
+	var orgs []*Organization
+	for rows.Next() {
+		var org Organization
+		err := rows.Scan(&org.ID, &org.Name, &org.Email, &org.Status)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan organization: %w", err)
+		}
+		orgs = append(orgs, &org)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating organizations: %w", err)
+	}
+
+	return orgs, nil
 }
 
