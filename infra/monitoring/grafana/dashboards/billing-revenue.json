@@ -1,0 +1,445 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "billing-revenue",
+    "title": "Billing & Revenue Dashboard",
+    "tags": ["billing", "revenue", "invoices"],
+    "timezone": "browser",
+    "schemaVersion": 16,
+    "version": 0,
+    "refresh": "1m",
+    "panels": [
+      {
+        "id": 1,
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+        "type": "graph",
+        "title": "Monthly Revenue Trend",
+        "targets": [
+          {
+            "expr": "sum(increase(billing_invoice_amount_total[30d])) by (status)",
+            "legendFormat": "{{status}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "currencyUSD",
+            "decimals": 2
+          }
+        },
+        "options": {
+          "legend": {"displayMode": "table", "placement": "bottom"},
+          "tooltip": {"mode": "multi"}
+        }
+      },
+      {
+        "id": 2,
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+        "type": "graph",
+        "title": "Invoice Generation Success Rate",
+        "targets": [
+          {
+            "expr": "sum(rate(billing_invoices_generated_total{status=\"success\"}[5m])) / sum(rate(billing_invoices_generated_total[5m])) * 100",
+            "legendFormat": "Success Rate",
+            "refId": "A"
+          },
+          {
+            "expr": "sum(rate(billing_invoices_generated_total{status=\"failed\"}[5m]))",
+            "legendFormat": "Failures",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent"
+          }
+        },
+        "options": {
+          "legend": {"displayMode": "table", "placement": "bottom"},
+          "tooltip": {"mode": "multi"}
+        },
+        "alert": {
+          "name": "Low Invoice Generation Success Rate",
+          "conditions": [
+            {
+              "evaluator": {"type": "lt", "params": [95]},
+              "query": {"params": ["A", "5m", "now"]}
+            }
+          ]
+        }
+      },
+      {
+        "id": 3,
+        "gridPos": {"h": 8, "w": 8, "x": 0, "y": 8},
+        "type": "stat",
+        "title": "Total MRR (Monthly Recurring Revenue)",
+        "targets": [
+          {
+            "expr": "sum(billing_mrr_total) by (organization_id)",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "currencyUSD",
+            "decimals": 2,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": null, "color": "text"},
+                {"value": 10000, "color": "green"},
+                {"value": 100000, "color": "blue"}
+              ]
+            }
+          }
+        },
+        "options": {
+          "colorMode": "background",
+          "graphMode": "area",
+          "textMode": "value_and_name"
+        }
+      },
+      {
+        "id": 4,
+        "gridPos": {"h": 8, "w": 8, "x": 8, "y": 8},
+        "type": "stat",
+        "title": "Invoices Generated Today",
+        "targets": [
+          {
+            "expr": "sum(increase(billing_invoices_generated_total[24h]))",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "decimals": 0
+          }
+        },
+        "options": {
+          "colorMode": "value",
+          "graphMode": "area",
+          "textMode": "auto"
+        }
+      },
+      {
+        "id": 5,
+        "gridPos": {"h": 8, "w": 8, "x": 16, "y": 8},
+        "type": "stat",
+        "title": "Average Invoice Amount",
+        "targets": [
+          {
+            "expr": "avg(rate(billing_invoice_amount_total[24h]) / rate(billing_invoices_generated_total[24h]))",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "currencyUSD",
+            "decimals": 2
+          }
+        },
+        "options": {
+          "colorMode": "value",
+          "graphMode": "area",
+          "textMode": "auto"
+        }
+      },
+      {
+        "id": 6,
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+        "type": "graph",
+        "title": "Revenue by Organization (Top 10)",
+        "targets": [
+          {
+            "expr": "topk(10, sum(increase(billing_invoice_amount_total[30d])) by (organization_id))",
+            "legendFormat": "Org {{organization_id}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "currencyUSD"
+          }
+        },
+        "options": {
+          "legend": {"displayMode": "table", "placement": "right"},
+          "tooltip": {"mode": "multi"}
+        }
+      },
+      {
+        "id": 7,
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+        "type": "piechart",
+        "title": "Invoice Status Distribution",
+        "targets": [
+          {
+            "expr": "sum(billing_invoices_by_status) by (status)",
+            "legendFormat": "{{status}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short"
+          }
+        },
+        "options": {
+          "legend": {"displayMode": "list", "placement": "right"},
+          "pieType": "donut"
+        }
+      },
+      {
+        "id": 8,
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
+        "type": "graph",
+        "title": "Usage Aggregation Processing Time",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(billing_usage_aggregation_duration_ms_bucket[5m])) by (le))",
+            "legendFormat": "P95",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.99, sum(rate(billing_usage_aggregation_duration_ms_bucket[5m])) by (le))",
+            "legendFormat": "P99",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ms",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": null, "color": "green"},
+                {"value": 5000, "color": "yellow"},
+                {"value": 10000, "color": "red"}
+              ]
+            }
+          }
+        },
+        "options": {
+          "legend": {"displayMode": "list", "placement": "bottom"}
+        }
+      },
+      {
+        "id": 9,
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24},
+        "type": "graph",
+        "title": "PDF Generation Success Rate",
+        "targets": [
+          {
+            "expr": "sum(rate(billing_pdf_generated_total{status=\"success\"}[5m])) / sum(rate(billing_pdf_generated_total[5m])) * 100",
+            "legendFormat": "Success Rate",
+            "refId": "A"
+          },
+          {
+            "expr": "sum(rate(billing_pdf_generation_errors_total[5m])) by (error_type)",
+            "legendFormat": "Errors: {{error_type}}",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent"
+          }
+        },
+        "options": {
+          "legend": {"displayMode": "table", "placement": "bottom"}
+        }
+      },
+      {
+        "id": 10,
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 32},
+        "type": "graph",
+        "title": "Stripe Payment Processing",
+        "targets": [
+          {
+            "expr": "sum(rate(billing_stripe_charges_total{status=\"succeeded\"}[5m]))",
+            "legendFormat": "Successful Charges",
+            "refId": "A"
+          },
+          {
+            "expr": "sum(rate(billing_stripe_charges_total{status=\"failed\"}[5m]))",
+            "legendFormat": "Failed Charges",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ops"
+          }
+        },
+        "options": {
+          "legend": {"displayMode": "table", "placement": "bottom"}
+        }
+      },
+      {
+        "id": 11,
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 32},
+        "type": "graph",
+        "title": "Email Notification Delivery",
+        "targets": [
+          {
+            "expr": "sum(rate(billing_emails_sent_total{status=\"success\"}[5m]))",
+            "legendFormat": "Delivered",
+            "refId": "A"
+          },
+          {
+            "expr": "sum(rate(billing_emails_sent_total{status=\"failed\"}[5m]))",
+            "legendFormat": "Failed",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ops"
+          }
+        },
+        "options": {
+          "legend": {"displayMode": "table", "placement": "bottom"}
+        }
+      },
+      {
+        "id": 12,
+        "gridPos": {"h": 6, "w": 6, "x": 0, "y": 40},
+        "type": "stat",
+        "title": "Outstanding Invoices",
+        "targets": [
+          {
+            "expr": "sum(billing_invoices_by_status{status=~\"pending|draft\"})",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": null, "color": "green"},
+                {"value": 100, "color": "yellow"},
+                {"value": 500, "color": "red"}
+              ]
+            }
+          }
+        },
+        "options": {
+          "colorMode": "background",
+          "textMode": "auto"
+        }
+      },
+      {
+        "id": 13,
+        "gridPos": {"h": 6, "w": 6, "x": 6, "y": 40},
+        "type": "stat",
+        "title": "Cron Job Success Rate (24h)",
+        "targets": [
+          {
+            "expr": "sum(increase(billing_cron_runs_total{status=\"success\"}[24h])) / sum(increase(billing_cron_runs_total[24h])) * 100",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": null, "color": "red"},
+                {"value": 95, "color": "yellow"},
+                {"value": 99, "color": "green"}
+              ]
+            }
+          }
+        },
+        "options": {
+          "colorMode": "background",
+          "textMode": "auto"
+        }
+      },
+      {
+        "id": 14,
+        "gridPos": {"h": 6, "w": 6, "x": 12, "y": 40},
+        "type": "stat",
+        "title": "S3 Upload Success Rate",
+        "targets": [
+          {
+            "expr": "sum(rate(billing_s3_uploads_total{status=\"success\"}[5m])) / sum(rate(billing_s3_uploads_total[5m])) * 100",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": null, "color": "red"},
+                {"value": 95, "color": "yellow"},
+                {"value": 99, "color": "green"}
+              ]
+            }
+          }
+        },
+        "options": {
+          "colorMode": "background",
+          "textMode": "auto"
+        }
+      },
+      {
+        "id": 15,
+        "gridPos": {"h": 6, "w": 6, "x": 18, "y": 40},
+        "type": "stat",
+        "title": "Revenue Growth (MoM)",
+        "targets": [
+          {
+            "expr": "(sum(increase(billing_invoice_amount_total[30d])) - sum(increase(billing_invoice_amount_total[60d] offset 30d))) / sum(increase(billing_invoice_amount_total[60d] offset 30d)) * 100",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "decimals": 1,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": null, "color": "red"},
+                {"value": 0, "color": "yellow"},
+                {"value": 10, "color": "green"}
+              ]
+            }
+          }
+        },
+        "options": {
+          "colorMode": "background",
+          "textMode": "auto"
+        }
+      }
+    ],
+    "templating": {
+      "list": [
+        {
+          "name": "organization",
+          "type": "query",
+          "datasource": "Prometheus",
+          "query": "label_values(billing_invoice_amount_total, organization_id)",
+          "multi": true,
+          "includeAll": true
+        },
+        {
+          "name": "time_range",
+          "type": "interval",
+          "options": ["1h", "6h", "24h", "7d", "30d"],
+          "current": {"text": "24h", "value": "24h"}
+        }
+      ]
+    },
+    "time": {
+      "from": "now-30d",
+      "to": "now"
+    }
+  }
+}
