@@ -1,0 +1,425 @@
+# Prometheus Alerting Rules for Multi-Tenant SaaS Platform
+# Documentation: https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/
+
+groups:
+  # ============================================================
+  # Gateway SLO Alerts - Service Level Objectives
+  # ============================================================
+  - name: gateway_slos
+    interval: 30s
+    rules:
+      - alert: GatewayHighLatency
+        expr: histogram_quantile(0.95, sum(rate(gateway_request_duration_ms_bucket[5m])) by (le, endpoint)) > 75
+        for: 5m
+        labels:
+          severity: warning
+          component: gateway
+          slo: latency
+        annotations:
+          summary: "Gateway P95 latency > 75ms (SLO: 50ms)"
+          description: "P95 latency for {{ $labels.endpoint }} is {{ $value }}ms, exceeding SLO of 50ms for 5 minutes"
+          runbook: "https://wiki.company.com/runbooks/gateway-high-latency"
+
+      - alert: GatewayCriticalLatency
+        expr: histogram_quantile(0.95, sum(rate(gateway_request_duration_ms_bucket[5m])) by (le, endpoint)) > 100
+        for: 2m
+        labels:
+          severity: critical
+          component: gateway
+          slo: latency
+        annotations:
+          summary: "Gateway P95 latency > 100ms - CRITICAL"
+          description: "P95 latency for {{ $labels.endpoint }} is {{ $value }}ms, severely exceeding SLO"
+          runbook: "https://wiki.company.com/runbooks/gateway-critical-latency"
+
+      - alert: GatewayHighErrorRate
+        expr: sum(rate(gateway_requests_total{status=~"5.."}[5m])) / sum(rate(gateway_requests_total[5m])) * 100 > 5
+        for: 5m
+        labels:
+          severity: critical
+          component: gateway
+          slo: availability
+        annotations:
+          summary: "Gateway error rate > 5%"
+          description: "5xx error rate is {{ $value | humanizePercentage }}, exceeding 5% threshold"
+          runbook: "https://wiki.company.com/runbooks/gateway-high-error-rate"
+
+      - alert: GatewayAvailabilityDegraded
+        expr: sum(rate(gateway_requests_total{status=~"5.."}[5m])) / sum(rate(gateway_requests_total[5m])) * 100 > 1
+        for: 10m
+        labels:
+          severity: warning
+          component: gateway
+          slo: availability
+        annotations:
+          summary: "Gateway error rate > 1%"
+          description: "5xx error rate is {{ $value | humanizePercentage }}, exceeding 1% warning threshold"
+
+  # ============================================================
+  # Infrastructure Health Alerts
+  # ============================================================
+  - name: infrastructure_health
+    interval: 30s
+    rules:
+      - alert: RedisCacheDown
+        expr: up{job="redis"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: redis
+        annotations:
+          summary: "Redis cluster unreachable - fail-open mode activated"
+          description: "Redis instance {{ $labels.instance }} has been down for 1 minute. Gateway will operate in fail-open mode."
+          runbook: "https://wiki.company.com/runbooks/redis-down"
+
+      - alert: PostgresDown
+        expr: up{job="postgres"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: database
+        annotations:
+          summary: "PostgreSQL database is unreachable"
+          description: "PostgreSQL instance {{ $labels.instance }} is down"
+          runbook: "https://wiki.company.com/runbooks/postgres-down"
+
+      - alert: KafkaDown
+        expr: up{job="kafka"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: kafka
+        annotations:
+          summary: "Kafka cluster is unreachable"
+          description: "Kafka instance {{ $labels.instance }} has been down for 2 minutes"
+          runbook: "https://wiki.company.com/runbooks/kafka-down"
+
+      - alert: KafkaConsumerLag
+        expr: kafka_consumer_lag > 1000
+        for: 5m
+        labels:
+          severity: warning
+          component: kafka
+        annotations:
+          summary: "Kafka consumer lag exceeds 1000 messages"
+          description: "Consumer group {{ $labels.consumer_group }} has lag of {{ $value }} messages on topic {{ $labels.topic }}"
+          runbook: "https://wiki.company.com/runbooks/kafka-consumer-lag"
+
+      - alert: KafkaCriticalLag
+        expr: kafka_consumer_lag > 10000
+        for: 5m
+        labels:
+          severity: critical
+          component: kafka
+        annotations:
+          summary: "Kafka consumer lag > 10000 - CRITICAL"
+          description: "Consumer group {{ $labels.consumer_group }} has critical lag of {{ $value }} messages"
+
+  # ============================================================
+  # Database Performance Alerts
+  # ============================================================
+  - name: database_performance
+    interval: 30s
+    rules:
+      - alert: DatabaseConnectionPoolExhaustion
+        expr: (pg_stat_database_numbackends / pg_settings_max_connections) * 100 > 90
+        for: 5m
+        labels:
+          severity: critical
+          component: database
+        annotations:
+          summary: "PostgreSQL connection pool > 90% utilized"
+          description: "Database {{ $labels.datname }} is using {{ $value | humanizePercentage }} of available connections"
+          runbook: "https://wiki.company.com/runbooks/db-connection-pool"
+
+      - alert: DatabaseSlowQueries
+        expr: histogram_quantile(0.95, sum(rate(gateway_db_query_duration_ms_bucket[5m])) by (le, query_type)) > 100
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "Database query P95 latency > 100ms"
+          description: "Query type {{ $labels.query_type }} has P95 latency of {{ $value }}ms"
+
+      - alert: DatabaseReplicationLag
+        expr: pg_replication_lag_seconds > 30
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "PostgreSQL replication lag > 30 seconds"
+          description: "Replica {{ $labels.instance }} is lagging by {{ $value }} seconds"
+
+  # ============================================================
+  # Billing & Revenue Alerts
+  # ============================================================
+  - name: billing_integrity
+    interval: 1m
+    rules:
+      - alert: BillingDiscrepancy
+        expr: abs(sum(timescaledb_usage_events_total) - sum(postgres_billing_records_total)) > 1000
+        for: 5m
+        labels:
+          severity: critical
+          component: billing
+        annotations:
+          summary: "Usage tracking mismatch detected - audit required"
+          description: "Discrepancy of {{ $value }} records between TimescaleDB usage and billing database"
+          runbook: "https://wiki.company.com/runbooks/billing-discrepancy"
+
+      - alert: InvoiceGenerationFailures
+        expr: sum(rate(billing_invoices_generated_total{status="failed"}[5m])) / sum(rate(billing_invoices_generated_total[5m])) * 100 > 5
+        for: 10m
+        labels:
+          severity: critical
+          component: billing
+        annotations:
+          summary: "Invoice generation failure rate > 5%"
+          description: "Invoice generation failing at {{ $value | humanizePercentage }} rate"
+          runbook: "https://wiki.company.com/runbooks/invoice-generation-failures"
+
+      - alert: PDFGenerationFailures
+        expr: sum(rate(billing_pdf_generated_total{status="failed"}[5m])) / sum(rate(billing_pdf_generated_total[5m])) * 100 > 5
+        for: 10m
+        labels:
+          severity: warning
+          component: billing
+        annotations:
+          summary: "PDF generation failure rate > 5%"
+          description: "PDF generation failing at {{ $value | humanizePercentage }} rate"
+
+      - alert: StripePaymentFailures
+        expr: sum(rate(billing_stripe_charges_total{status="failed"}[5m])) / sum(rate(billing_stripe_charges_total[5m])) * 100 > 10
+        for: 10m
+        labels:
+          severity: critical
+          component: billing
+        annotations:
+          summary: "Stripe payment failure rate > 10%"
+          description: "Payment processing failing at {{ $value | humanizePercentage }} rate - revenue impact"
+
+      - alert: EmailDeliveryFailures
+        expr: sum(rate(billing_emails_sent_total{status="failed"}[5m])) / sum(rate(billing_emails_sent_total[5m])) * 100 > 5
+        for: 10m
+        labels:
+          severity: warning
+          component: billing
+        annotations:
+          summary: "Email delivery failure rate > 5%"
+          description: "Invoice email delivery failing at {{ $value | humanizePercentage }} rate"
+
+      - alert: CronJobFailures
+        expr: sum(increase(billing_cron_runs_total{status="failed"}[1h])) > 2
+        for: 5m
+        labels:
+          severity: critical
+          component: billing
+        annotations:
+          summary: "Billing cron jobs failing repeatedly"
+          description: "{{ $value }} cron job failures in the last hour"
+          runbook: "https://wiki.company.com/runbooks/billing-cron-failures"
+
+      - alert: RevenueDrop
+        expr: sum(increase(billing_invoice_amount_total[24h])) < sum(increase(billing_invoice_amount_total[24h] offset 24h)) * 0.5
+        for: 1h
+        labels:
+          severity: critical
+          component: billing
+        annotations:
+          summary: "Revenue dropped > 50% compared to yesterday"
+          description: "Daily revenue is {{ $value | humanize }} USD, significantly lower than expected"
+
+  # ============================================================
+  # Rate Limiting & Authentication Alerts
+  # ============================================================
+  - name: rate_limiting
+    interval: 30s
+    rules:
+      - alert: HighRateLimitHitRate
+        expr: sum(rate(gateway_rate_limit_hits_total[5m])) > 100
+        for: 10m
+        labels:
+          severity: warning
+          component: gateway
+        annotations:
+          summary: "Rate limit hit rate exceeds 100/sec"
+          description: "Rate limiting is being triggered {{ $value }} times per second across all organizations"
+
+      - alert: OrganizationRateLimitSpike
+        expr: sum(rate(gateway_rate_limit_hits_total[5m])) by (organization_id) > 50
+        for: 5m
+        labels:
+          severity: warning
+          component: gateway
+        annotations:
+          summary: "Organization {{ $labels.organization_id }} hitting rate limits frequently"
+          description: "Organization {{ $labels.organization_id }} is being rate limited {{ $value }} times per second"
+
+      - alert: AuthenticationFailureSpike
+        expr: sum(rate(gateway_auth_failures_total[5m])) > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: gateway
+        annotations:
+          summary: "Authentication failure spike detected"
+          description: "Auth failures at {{ $value }}/sec - possible attack or integration issue"
+          runbook: "https://wiki.company.com/runbooks/auth-failure-spike"
+
+      - alert: APIKeyValidationFailures
+        expr: sum(rate(gateway_api_key_validations_total{result="failure"}[5m])) / sum(rate(gateway_api_key_validations_total[5m])) * 100 > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: gateway
+        annotations:
+          summary: "API key validation failure rate > 10%"
+          description: "{{ $value | humanizePercentage }} of API key validations are failing"
+
+  # ============================================================
+  # Cache Performance Alerts
+  # ============================================================
+  - name: cache_performance
+    interval: 30s
+    rules:
+      - alert: LowCacheHitRate
+        expr: sum(rate(gateway_cache_hits_total[5m])) / (sum(rate(gateway_cache_hits_total[5m])) + sum(rate(gateway_cache_misses_total[5m]))) * 100 < 70
+        for: 10m
+        labels:
+          severity: warning
+          component: cache
+        annotations:
+          summary: "Cache hit rate < 70%"
+          description: "Cache hit rate is {{ $value | humanizePercentage }}, below optimal 90% target"
+
+      - alert: CriticalCacheHitRate
+        expr: sum(rate(gateway_cache_hits_total[5m])) / (sum(rate(gateway_cache_hits_total[5m])) + sum(rate(gateway_cache_misses_total[5m]))) * 100 < 50
+        for: 5m
+        labels:
+          severity: critical
+          component: cache
+        annotations:
+          summary: "Cache hit rate < 50% - CRITICAL"
+          description: "Cache effectiveness severely degraded at {{ $value | humanizePercentage }}"
+
+  # ============================================================
+  # Resource Usage Alerts
+  # ============================================================
+  - name: resource_usage
+    interval: 30s
+    rules:
+      - alert: HighConcurrentRequests
+        expr: gateway_concurrent_requests > 1000
+        for: 5m
+        labels:
+          severity: warning
+          component: gateway
+        annotations:
+          summary: "High concurrent request load"
+          description: "{{ $value }} concurrent requests being processed - approaching capacity"
+
+      - alert: CriticalConcurrentRequests
+        expr: gateway_concurrent_requests > 2000
+        for: 2m
+        labels:
+          severity: critical
+          component: gateway
+        annotations:
+          summary: "CRITICAL concurrent request load"
+          description: "{{ $value }} concurrent requests - system at capacity"
+
+      - alert: HighActiveConnections
+        expr: sum(gateway_active_connections) > 5000
+        for: 5m
+        labels:
+          severity: warning
+          component: gateway
+        annotations:
+          summary: "High number of active connections"
+          description: "{{ $value }} active connections across all organizations"
+
+      - alert: UsageRecordingFailures
+        expr: sum(rate(gateway_usage_recording_errors_total[5m])) / sum(rate(gateway_usage_recorded_total[5m])) * 100 > 1
+        for: 5m
+        labels:
+          severity: critical
+          component: gateway
+        annotations:
+          summary: "Usage recording failure rate > 1%"
+          description: "{{ $value | humanizePercentage }} of usage events failing to record - billing impact"
+          runbook: "https://wiki.company.com/runbooks/usage-recording-failures"
+
+  # ============================================================
+  # Service Health Alerts
+  # ============================================================
+  - name: service_health
+    interval: 30s
+    rules:
+      - alert: ServiceDown
+        expr: up{job=~"gateway|usage-aggregator|billing-engine|dashboard-api"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: service
+        annotations:
+          summary: "Service {{ $labels.job }} is down"
+          description: "{{ $labels.job }} on {{ $labels.instance }} has been unreachable for 2 minutes"
+          runbook: "https://wiki.company.com/runbooks/service-down"
+
+      - alert: KafkaProducerLatency
+        expr: histogram_quantile(0.95, sum(rate(gateway_kafka_producer_latency_ms_bucket[5m])) by (le, topic)) > 100
+        for: 5m
+        labels:
+          severity: warning
+          component: kafka
+        annotations:
+          summary: "Kafka producer P95 latency > 100ms"
+          description: "Kafka publish latency for topic {{ $labels.topic }} is {{ $value }}ms"
+
+      - alert: S3UploadFailures
+        expr: sum(rate(billing_s3_uploads_total{status="failed"}[5m])) / sum(rate(billing_s3_uploads_total[5m])) * 100 > 5
+        for: 10m
+        labels:
+          severity: warning
+          component: storage
+        annotations:
+          summary: "S3 upload failure rate > 5%"
+          description: "PDF uploads to S3 failing at {{ $value | humanizePercentage }} rate"
+
+  # ============================================================
+  # Business Metrics Alerts
+  # ============================================================
+  - name: business_metrics
+    interval: 1m
+    rules:
+      - alert: MRRDecline
+        expr: (sum(billing_mrr_total) - sum(billing_mrr_total offset 7d)) / sum(billing_mrr_total offset 7d) * 100 < -10
+        for: 1h
+        labels:
+          severity: warning
+          component: business
+        annotations:
+          summary: "MRR declined > 10% in the last 7 days"
+          description: "Monthly Recurring Revenue decreased by {{ $value | humanizePercentage }}"
+
+      - alert: HighOutstandingInvoices
+        expr: sum(billing_invoices_by_status{status=~"pending|draft"}) > 500
+        for: 1h
+        labels:
+          severity: warning
+          component: billing
+        annotations:
+          summary: "Outstanding invoices exceeding threshold"
+          description: "{{ $value }} invoices in pending/draft status"
+
+      - alert: UsageAggregationSlow
+        expr: histogram_quantile(0.95, sum(rate(billing_usage_aggregation_duration_ms_bucket[5m])) by (le)) > 10000
+        for: 10m
+        labels:
+          severity: warning
+          component: billing
+        annotations:
+          summary: "Usage aggregation P95 time > 10 seconds"
+          description: "Aggregation processing taking {{ $value }}ms - may delay billing"
