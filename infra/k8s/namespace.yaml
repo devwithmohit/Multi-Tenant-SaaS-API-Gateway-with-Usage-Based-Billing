@@ -1,0 +1,279 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: saas-platform
+  labels:
+    name: saas-platform
+    environment: production
+---
+# Service Accounts
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gateway-sa
+  namespace: saas-platform
+  labels:
+    app: gateway
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: usage-aggregator-sa
+  namespace: saas-platform
+  labels:
+    app: usage-aggregator
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: billing-engine-sa
+  namespace: saas-platform
+  labels:
+    app: billing-engine
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dashboard-api-sa
+  namespace: saas-platform
+  labels:
+    app: dashboard-api
+---
+# RBAC - Roles
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gateway-role
+  namespace: saas-platform
+rules:
+- apiGroups: [""]
+  resources: ["configmaps", "secrets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: usage-aggregator-role
+  namespace: saas-platform
+rules:
+- apiGroups: [""]
+  resources: ["configmaps", "secrets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: billing-engine-role
+  namespace: saas-platform
+rules:
+- apiGroups: [""]
+  resources: ["configmaps", "secrets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["batch"]
+  resources: ["jobs", "cronjobs"]
+  verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: dashboard-api-role
+  namespace: saas-platform
+rules:
+- apiGroups: [""]
+  resources: ["configmaps", "secrets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list"]
+---
+# RBAC - Role Bindings
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gateway-rolebinding
+  namespace: saas-platform
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: gateway-role
+subjects:
+- kind: ServiceAccount
+  name: gateway-sa
+  namespace: saas-platform
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: usage-aggregator-rolebinding
+  namespace: saas-platform
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: usage-aggregator-role
+subjects:
+- kind: ServiceAccount
+  name: usage-aggregator-sa
+  namespace: saas-platform
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: billing-engine-rolebinding
+  namespace: saas-platform
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: billing-engine-role
+subjects:
+- kind: ServiceAccount
+  name: billing-engine-sa
+  namespace: saas-platform
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: dashboard-api-rolebinding
+  namespace: saas-platform
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: dashboard-api-role
+subjects:
+- kind: ServiceAccount
+  name: dashboard-api-sa
+  namespace: saas-platform
+---
+# Network Policies
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gateway-netpol
+  namespace: saas-platform
+spec:
+  podSelector:
+    matchLabels:
+      app: gateway
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 8080
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app: postgres
+    ports:
+    - protocol: TCP
+      port: 5432
+  - to:
+    - podSelector:
+        matchLabels:
+          app: redis
+    ports:
+    - protocol: TCP
+      port: 6379
+  - to:
+    - podSelector:
+        matchLabels:
+          app: kafka
+    ports:
+    - protocol: TCP
+      port: 9092
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 53
+    - protocol: UDP
+      port: 53
+---
+# Pod Disruption Budgets
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: gateway-pdb
+  namespace: saas-platform
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: gateway
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: usage-aggregator-pdb
+  namespace: saas-platform
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: usage-aggregator
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: dashboard-api-pdb
+  namespace: saas-platform
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: dashboard-api
+---
+# Resource Quotas
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: saas-platform-quota
+  namespace: saas-platform
+spec:
+  hard:
+    requests.cpu: "50"
+    requests.memory: "100Gi"
+    limits.cpu: "100"
+    limits.memory: "200Gi"
+    persistentvolumeclaims: "20"
+    services.loadbalancers: "2"
+---
+# Limit Ranges
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: saas-platform-limits
+  namespace: saas-platform
+spec:
+  limits:
+  - max:
+      cpu: "4"
+      memory: "8Gi"
+    min:
+      cpu: "100m"
+      memory: "128Mi"
+    default:
+      cpu: "500m"
+      memory: "512Mi"
+    defaultRequest:
+      cpu: "250m"
+      memory: "256Mi"
+    type: Container
+  - max:
+      cpu: "8"
+      memory: "16Gi"
+    min:
+      cpu: "100m"
+      memory: "128Mi"
+    type: Pod

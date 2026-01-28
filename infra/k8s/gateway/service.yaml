@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  namespace: saas-platform
+  labels:
+    app: gateway
+    component: api
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 10800
+  ports:
+  - name: http
+    port: 80
+    targetPort: http
+    protocol: TCP
+  - name: metrics
+    port: 8080
+    targetPort: metrics
+    protocol: TCP
+  selector:
+    app: gateway
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway-headless
+  namespace: saas-platform
+  labels:
+    app: gateway
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+  - name: http
+    port: 8080
+    targetPort: http
+    protocol: TCP
+  selector:
+    app: gateway

@@ -1,0 +1,213 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dashboard-api
+  namespace: saas-platform
+  labels:
+    app: dashboard-api
+    component: api
+    tier: frontend
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: dashboard-api
+  template:
+    metadata:
+      labels:
+        app: dashboard-api
+        component: api
+        tier: frontend
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8083"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: dashboard-api-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - dashboard-api
+              topologyKey: kubernetes.io/hostname
+
+      containers:
+      - name: dashboard-api
+        image: dashboard-api:latest
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 8083
+          protocol: TCP
+        - name: metrics
+          containerPort: 8083
+          protocol: TCP
+
+        env:
+        - name: ENV
+          value: "production"
+        - name: LOG_LEVEL
+          value: "info"
+        - name: PORT
+          value: "8083"
+
+        # Database Configuration
+        - name: POSTGRES_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: dashboard-api-config
+              key: postgres.host
+        - name: POSTGRES_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: dashboard-api-config
+              key: postgres.port
+        - name: POSTGRES_DATABASE
+          valueFrom:
+            configMapKeyRef:
+              name: dashboard-api-config
+              key: postgres.database
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: dashboard-api-secrets
+              key: postgres.user
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: dashboard-api-secrets
+              key: postgres.password
+
+        # JWT Configuration
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: dashboard-api-secrets
+              key: jwt.secret
+        - name: JWT_EXPIRATION
+          value: "24h"
+
+        # CORS Configuration
+        - name: CORS_ALLOWED_ORIGINS
+          value: "https://dashboard.company.com"
+
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+
+      volumes:
+      - name: tmp
+        emptyDir: {}
+
+      terminationGracePeriodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dashboard-api
+  namespace: saas-platform
+  labels:
+    app: dashboard-api
+spec:
+  type: ClusterIP
+  ports:
+  - name: http
+    port: 80
+    targetPort: http
+    protocol: TCP
+  - name: metrics
+    port: 8083
+    targetPort: metrics
+    protocol: TCP
+  selector:
+    app: dashboard-api
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-api-config
+  namespace: saas-platform
+  labels:
+    app: dashboard-api
+data:
+  # Database Configuration
+  postgres.host: "postgres.saas-platform.svc.cluster.local"
+  postgres.port: "5432"
+  postgres.database: "dashboard"
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: dashboard-api
+  namespace: saas-platform
+  labels:
+    app: dashboard-api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: dashboard-api
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80

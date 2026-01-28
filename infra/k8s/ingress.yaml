@@ -1,0 +1,182 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: saas-platform-ingress
+  namespace: saas-platform
+  labels:
+    app: ingress
+  annotations:
+    # NGINX Ingress Controller
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+
+    # Certificate Management (cert-manager)
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    cert-manager.io/acme-challenge-type: "http01"
+
+    # Rate Limiting
+    nginx.ingress.kubernetes.io/limit-rps: "100"
+    nginx.ingress.kubernetes.io/limit-connections: "50"
+
+    # Security Headers
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      more_set_headers "X-Frame-Options: DENY";
+      more_set_headers "X-Content-Type-Options: nosniff";
+      more_set_headers "X-XSS-Protection: 1; mode=block";
+      more_set_headers "Strict-Transport-Security: max-age=31536000; includeSubDomains";
+      more_set_headers "Content-Security-Policy: default-src 'self'";
+
+    # CORS
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "https://dashboard.company.com"
+    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, OPTIONS"
+    nginx.ingress.kubernetes.io/cors-allow-headers: "Content-Type, Authorization, X-API-Key, X-Organization-ID"
+    nginx.ingress.kubernetes.io/cors-max-age: "3600"
+
+    # Timeouts
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+
+    # Body Size
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+
+    # WebSocket Support
+    nginx.ingress.kubernetes.io/websocket-services: "gateway"
+
+    # Load Balancing
+    nginx.ingress.kubernetes.io/load-balance: "least_conn"
+    nginx.ingress.kubernetes.io/upstream-hash-by: "$remote_addr"
+spec:
+  tls:
+  - hosts:
+    - api.company.com
+    - dashboard-api.company.com
+    - dashboard.company.com
+    secretName: saas-platform-tls
+
+  rules:
+  # Gateway API - Main API Gateway
+  - host: api.company.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: gateway
+            port:
+              number: 80
+
+  # Dashboard API - Customer Self-Service
+  - host: dashboard-api.company.com
+    http:
+      paths:
+      - path: /api/v1/auth
+        pathType: Prefix
+        backend:
+          service:
+            name: dashboard-api
+            port:
+              number: 80
+      - path: /api/v1/usage
+        pathType: Prefix
+        backend:
+          service:
+            name: dashboard-api
+            port:
+              number: 80
+      - path: /api/v1/apikeys
+        pathType: Prefix
+        backend:
+          service:
+            name: dashboard-api
+            port:
+              number: 80
+      - path: /api/v1/invoices
+        pathType: Prefix
+        backend:
+          service:
+            name: dashboard-api
+            port:
+              number: 80
+      - path: /health
+        pathType: Exact
+        backend:
+          service:
+            name: dashboard-api
+            port:
+              number: 80
+
+  # Dashboard Frontend - React Application
+  - host: dashboard.company.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: dashboard-frontend
+            port:
+              number: 80
+---
+# Internal Ingress for Monitoring Stack
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: monitoring-ingress
+  namespace: saas-platform
+  labels:
+    app: monitoring
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/auth-type: "basic"
+    nginx.ingress.kubernetes.io/auth-secret: "monitoring-basic-auth"
+    nginx.ingress.kubernetes.io/auth-realm: "Authentication Required - Monitoring"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  tls:
+  - hosts:
+    - prometheus.company.com
+    - grafana.company.com
+    - alertmanager.company.com
+    secretName: monitoring-tls
+
+  rules:
+  # Prometheus
+  - host: prometheus.company.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: prometheus
+            port:
+              number: 9090
+
+  # Grafana
+  - host: grafana.company.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: grafana
+            port:
+              number: 3000
+
+  # Alertmanager
+  - host: alertmanager.company.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: alertmanager
+            port:
+              number: 9093

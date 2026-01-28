@@ -1,0 +1,308 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: billing-hourly-aggregation
+  namespace: saas-platform
+  labels:
+    app: billing-engine
+    component: aggregation
+    schedule: hourly
+spec:
+  schedule: "0 * * * *"  # Every hour at minute 0
+  timeZone: "UTC"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 3600
+      template:
+        metadata:
+          labels:
+            app: billing-engine
+            component: aggregation
+          annotations:
+            prometheus.io/scrape: "false"
+        spec:
+          serviceAccountName: billing-engine-sa
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            fsGroup: 1000
+
+          containers:
+          - name: hourly-aggregation
+            image: billing-engine:latest
+            imagePullPolicy: Always
+            command: ["/app/billing"]
+            args: ["--job=hourly-aggregation"]
+
+            env:
+            - name: ENV
+              value: "production"
+            - name: LOG_LEVEL
+              value: "info"
+            - name: JOB_TYPE
+              value: "hourly-aggregation"
+
+            # Database Configuration
+            - name: POSTGRES_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: billing-engine-config
+                  key: postgres.host
+            - name: POSTGRES_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: billing-engine-config
+                  key: postgres.port
+            - name: POSTGRES_DATABASE
+              valueFrom:
+                configMapKeyRef:
+                  name: billing-engine-config
+                  key: postgres.database
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: billing-engine-secrets
+                  key: postgres.user
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: billing-engine-secrets
+                  key: postgres.password
+
+            # TimescaleDB Configuration
+            - name: TIMESCALE_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: billing-engine-config
+                  key: timescale.host
+            - name: TIMESCALE_DATABASE
+              valueFrom:
+                configMapKeyRef:
+                  name: billing-engine-config
+                  key: timescale.database
+            - name: TIMESCALE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: billing-engine-secrets
+                  key: timescale.user
+            - name: TIMESCALE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: billing-engine-secrets
+                  key: timescale.password
+
+            resources:
+              requests:
+                memory: "512Mi"
+                cpu: "500m"
+              limits:
+                memory: "1Gi"
+                cpu: "1000m"
+
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop:
+                - ALL
+
+            volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+
+          volumes:
+          - name: tmp
+            emptyDir: {}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: billing-monthly-invoices
+  namespace: saas-platform
+  labels:
+    app: billing-engine
+    component: invoicing
+    schedule: monthly
+spec:
+  schedule: "0 0 1 * *"  # First day of every month at midnight UTC
+  timeZone: "UTC"
+  successfulJobsHistoryLimit: 12
+  failedJobsHistoryLimit: 12
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      backoffLimit: 3
+      activeDeadlineSeconds: 10800
+      template:
+        metadata:
+          labels:
+            app: billing-engine
+            component: invoicing
+          annotations:
+            prometheus.io/scrape: "false"
+        spec:
+          serviceAccountName: billing-engine-sa
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            fsGroup: 1000
+
+          containers:
+          - name: monthly-invoices
+            image: billing-engine:latest
+            imagePullPolicy: Always
+            command: ["/app/billing"]
+            args: ["--job=monthly-invoices"]
+
+            env:
+            - name: ENV
+              value: "production"
+            - name: LOG_LEVEL
+              value: "info"
+            - name: JOB_TYPE
+              value: "monthly-invoices"
+
+            # Database Configuration
+            - name: POSTGRES_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: billing-engine-config
+                  key: postgres.host
+            - name: POSTGRES_DATABASE
+              valueFrom:
+                configMapKeyRef:
+                  name: billing-engine-config
+                  key: postgres.database
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: billing-engine-secrets
+                  key: postgres.user
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: billing-engine-secrets
+                  key: postgres.password
+
+            # S3 Configuration
+            - name: S3_BUCKET
+              valueFrom:
+                configMapKeyRef:
+                  name: billing-engine-config
+                  key: s3.bucket
+            - name: S3_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: billing-engine-config
+                  key: s3.region
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: billing-engine-secrets
+                  key: aws.access_key_id
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: billing-engine-secrets
+                  key: aws.secret_access_key
+
+            # Stripe Configuration
+            - name: STRIPE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: billing-engine-secrets
+                  key: stripe.api_key
+            - name: STRIPE_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: billing-engine-secrets
+                  key: stripe.webhook_secret
+
+            # Email Configuration
+            - name: SMTP_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: billing-engine-config
+                  key: smtp.host
+            - name: SMTP_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: billing-engine-config
+                  key: smtp.port
+            - name: SMTP_FROM
+              valueFrom:
+                configMapKeyRef:
+                  name: billing-engine-config
+                  key: smtp.from
+            - name: SMTP_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: billing-engine-secrets
+                  key: smtp.username
+            - name: SMTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: billing-engine-secrets
+                  key: smtp.password
+
+            resources:
+              requests:
+                memory: "1Gi"
+                cpu: "1000m"
+              limits:
+                memory: "2Gi"
+                cpu: "2000m"
+
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop:
+                - ALL
+
+            volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: pdf-cache
+              mountPath: /app/pdf-cache
+
+          volumes:
+          - name: tmp
+            emptyDir: {}
+          - name: pdf-cache
+            emptyDir:
+              sizeLimit: 5Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: billing-engine-config
+  namespace: saas-platform
+  labels:
+    app: billing-engine
+data:
+  # Database Configuration
+  postgres.host: "postgres.saas-platform.svc.cluster.local"
+  postgres.port: "5432"
+  postgres.database: "billing"
+
+  # TimescaleDB Configuration
+  timescale.host: "timescaledb.saas-platform.svc.cluster.local"
+  timescale.database: "usage_metrics"
+
+  # S3 Configuration
+  s3.bucket: "company-invoices-prod"
+  s3.region: "us-east-1"
+
+  # Email Configuration
+  smtp.host: "smtp.sendgrid.net"
+  smtp.port: "587"
+  smtp.from: "billing@company.com"

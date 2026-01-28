@@ -1,0 +1,78 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: gateway
+  namespace: saas-platform
+  labels:
+    app: gateway
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: gateway
+  minReplicas: 3
+  maxReplicas: 20
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+      - type: Pods
+        value: 2
+        periodSeconds: 60
+      selectPolicy: Min
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 30
+      - type: Pods
+        value: 4
+        periodSeconds: 30
+      selectPolicy: Max
+  metrics:
+  # CPU-based scaling
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 60
+
+  # Memory-based scaling
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 70
+
+  # Custom metric: Request latency
+  - type: Pods
+    pods:
+      metric:
+        name: gateway_request_duration_ms
+      target:
+        type: AverageValue
+        averageValue: "40"  # Target 40ms avg to stay under 50ms P95 SLO
+
+  # Custom metric: Request rate per pod
+  - type: Pods
+    pods:
+      metric:
+        name: gateway_requests_per_second
+      target:
+        type: AverageValue
+        averageValue: "100"  # Target 100 RPS per pod
+
+  # Custom metric: Concurrent requests
+  - type: Pods
+    pods:
+      metric:
+        name: gateway_concurrent_requests
+      target:
+        type: AverageValue
+        averageValue: "50"  # Target 50 concurrent requests per pod

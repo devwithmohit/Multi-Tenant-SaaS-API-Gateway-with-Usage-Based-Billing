@@ -1,0 +1,219 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: usage-aggregator
+  namespace: saas-platform
+  labels:
+    app: usage-aggregator
+    component: processor
+    tier: backend
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: usage-aggregator
+  template:
+    metadata:
+      labels:
+        app: usage-aggregator
+        component: processor
+        tier: backend
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8081"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: usage-aggregator-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - usage-aggregator
+              topologyKey: kubernetes.io/hostname
+
+      initContainers:
+      - name: wait-for-kafka
+        image: confluentinc/cp-kafka:7.5.0
+        command:
+        - sh
+        - -c
+        - |
+          until kafka-broker-api-versions --bootstrap-server $(KAFKA_BROKERS) > /dev/null 2>&1; do
+            echo "Waiting for kafka..."
+            sleep 5
+          done
+        env:
+        - name: KAFKA_BROKERS
+          valueFrom:
+            configMapKeyRef:
+              name: usage-aggregator-config
+              key: kafka.brokers
+
+      containers:
+      - name: usage-aggregator
+        image: usage-aggregator:latest
+        imagePullPolicy: Always
+        ports:
+        - name: metrics
+          containerPort: 8081
+          protocol: TCP
+
+        env:
+        - name: ENV
+          value: "production"
+        - name: LOG_LEVEL
+          value: "info"
+
+        # Kafka Consumer Configuration
+        - name: KAFKA_BROKERS
+          valueFrom:
+            configMapKeyRef:
+              name: usage-aggregator-config
+              key: kafka.brokers
+        - name: KAFKA_TOPIC_USAGE
+          valueFrom:
+            configMapKeyRef:
+              name: usage-aggregator-config
+              key: kafka.topic.usage
+        - name: KAFKA_CONSUMER_GROUP
+          valueFrom:
+            configMapKeyRef:
+              name: usage-aggregator-config
+              key: kafka.consumer_group
+        - name: KAFKA_AUTO_OFFSET_RESET
+          value: "earliest"
+        - name: KAFKA_MAX_POLL_RECORDS
+          value: "500"
+        - name: KAFKA_SESSION_TIMEOUT_MS
+          value: "30000"
+        - name: KAFKA_HEARTBEAT_INTERVAL_MS
+          value: "10000"
+
+        # TimescaleDB Configuration
+        - name: TIMESCALE_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: usage-aggregator-config
+              key: timescale.host
+        - name: TIMESCALE_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: usage-aggregator-config
+              key: timescale.port
+        - name: TIMESCALE_DATABASE
+          valueFrom:
+            configMapKeyRef:
+              name: usage-aggregator-config
+              key: timescale.database
+        - name: TIMESCALE_USER
+          valueFrom:
+            secretKeyRef:
+              name: usage-aggregator-secrets
+              key: timescale.user
+        - name: TIMESCALE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: usage-aggregator-secrets
+              key: timescale.password
+
+        # Aggregation Configuration
+        - name: BATCH_SIZE
+          value: "1000"
+        - name: BATCH_TIMEOUT
+          value: "10s"
+        - name: WORKER_COUNT
+          value: "4"
+
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "2000m"
+
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: metrics
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: metrics
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+
+      volumes:
+      - name: tmp
+        emptyDir: {}
+
+      terminationGracePeriodSeconds: 60
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: usage-aggregator
+  namespace: saas-platform
+  labels:
+    app: usage-aggregator
+spec:
+  type: ClusterIP
+  ports:
+  - name: metrics
+    port: 8081
+    targetPort: metrics
+    protocol: TCP
+  selector:
+    app: usage-aggregator
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: usage-aggregator-config
+  namespace: saas-platform
+  labels:
+    app: usage-aggregator
+data:
+  # Kafka Configuration
+  kafka.brokers: "kafka-0.kafka-headless.saas-platform.svc.cluster.local:9092,kafka-1.kafka-headless.saas-platform.svc.cluster.local:9092,kafka-2.kafka-headless.saas-platform.svc.cluster.local:9092"
+  kafka.topic.usage: "usage-events"
+  kafka.consumer_group: "usage-aggregator-group"
+
+  # TimescaleDB Configuration
+  timescale.host: "timescaledb.saas-platform.svc.cluster.local"
+  timescale.port: "5432"
+  timescale.database: "usage_metrics"
