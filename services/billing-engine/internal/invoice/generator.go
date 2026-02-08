@@ -293,7 +293,7 @@ func (g *InvoiceGenerator) getBillingRecordsForMonth(ctx context.Context, month 
 // getOrganization retrieves organization details
 func (g *InvoiceGenerator) getOrganization(ctx context.Context, orgID string) (*Organization, error) {
 	query := `
-		SELECT id, name, email, billing_address
+		SELECT id, name, billing_email, 'No address on file'::text as billing_address
 		FROM organizations
 		WHERE id = $1
 	`

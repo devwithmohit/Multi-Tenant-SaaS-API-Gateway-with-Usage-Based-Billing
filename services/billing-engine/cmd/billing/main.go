@@ -408,7 +408,7 @@ func runHourlyAggregation(db *sql.DB, usageAgg *aggregator.UsageAggregator) erro
 // runMonthlyInvoiceGeneration generates invoices for all organizations
 // This job runs on the 1st of each month at 00:00 UTC
 func runMonthlyInvoiceGeneration(
-	cfg *config.Config,
+	cfg *billingConfig.Config,
 	db *sql.DB,
 	usageAgg *aggregator.UsageAggregator,
 	calculator *pricing.Calculator,
