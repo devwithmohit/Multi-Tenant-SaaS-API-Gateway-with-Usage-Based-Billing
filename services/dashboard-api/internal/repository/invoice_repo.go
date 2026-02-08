@@ -33,8 +33,9 @@ func (r *InvoiceRepository) ListInvoices(ctx context.Context, orgID string, page
 	// Get invoices
 	query := `
 		SELECT id, invoice_number, organization_id, customer_name, customer_email,
-		       billing_period_start, billing_period_end, status, subtotal, tax, total,
-		       currency, due_date, paid_at, pdf_url, stripe_invoice_id, created_at, updated_at
+		       billing_period_start, billing_period_end, status,
+		       subtotal_cents, tax_cents, total_cents,
+		       due_date, paid_at, pdf_url, stripe_invoice_id, created_at, updated_at
 		FROM invoices
 		WHERE organization_id = $1
 		ORDER BY created_at DESC
@@ -50,6 +51,9 @@ func (r *InvoiceRepository) ListInvoices(ctx context.Context, orgID string, page
 	var invoices []models.Invoice
 	for rows.Next() {
 		var inv models.Invoice
+		var subtotalCents, taxCents, totalCents int64
+		var pdfURL, stripeInvoiceID sql.NullString
+		var paidAt sql.NullTime
 		err := rows.Scan(
 			&inv.ID,
 			&inv.InvoiceNumber,
@@ -59,20 +63,37 @@ func (r *InvoiceRepository) ListInvoices(ctx context.Context, orgID string, page
 			&inv.BillingPeriodStart,
 			&inv.BillingPeriodEnd,
 			&inv.Status,
-			&inv.Subtotal,
-			&inv.Tax,
-			&inv.Total,
-			&inv.Currency,
+			&subtotalCents,
+			&taxCents,
+			&totalCents,
 			&inv.DueDate,
-			&inv.PaidAt,
-			&inv.PDFURL,
-			&inv.StripeInvoiceID,
+			&paidAt,
+			&pdfURL,
+			&stripeInvoiceID,
 			&inv.CreatedAt,
 			&inv.UpdatedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan invoice: %w", err)
 		}
+
+		// Convert cents to dollars
+		inv.Subtotal = float64(subtotalCents) / 100.0
+		inv.Tax = float64(taxCents) / 100.0
+		inv.Total = float64(totalCents) / 100.0
+		inv.Currency = "USD"
+
+		// Handle nullable fields
+		if pdfURL.Valid {
+			inv.PDFURL = pdfURL.String
+		}
+		if stripeInvoiceID.Valid {
+			inv.StripeInvoiceID = stripeInvoiceID.String
+		}
+		if paidAt.Valid {
+			inv.PaidAt = &paidAt.Time
+		}
+
 		invoices = append(invoices, inv)
 	}
 
@@ -94,13 +115,17 @@ func (r *InvoiceRepository) ListInvoices(ctx context.Context, orgID string, page
 func (r *InvoiceRepository) GetInvoice(ctx context.Context, invoiceID, orgID string) (*models.Invoice, error) {
 	query := `
 		SELECT id, invoice_number, organization_id, customer_name, customer_email,
-		       billing_period_start, billing_period_end, status, subtotal, tax, total,
-		       currency, due_date, paid_at, pdf_url, stripe_invoice_id, created_at, updated_at
+		       billing_period_start, billing_period_end, status,
+		       subtotal_cents, tax_cents, total_cents,
+		       due_date, paid_at, pdf_url, stripe_invoice_id, created_at, updated_at
 		FROM invoices
 		WHERE id = $1 AND organization_id = $2
 	`
 
 	var inv models.Invoice
+	var subtotalCents, taxCents, totalCents int64
+	var pdfURL, stripeInvoiceID sql.NullString
+	var paidAt sql.NullTime
 	err := r.db.QueryRowContext(ctx, query, invoiceID, orgID).Scan(
 		&inv.ID,
 		&inv.InvoiceNumber,
@@ -110,14 +135,13 @@ func (r *InvoiceRepository) GetInvoice(ctx context.Context, invoiceID, orgID str
 		&inv.BillingPeriodStart,
 		&inv.BillingPeriodEnd,
 		&inv.Status,
-		&inv.Subtotal,
-		&inv.Tax,
-		&inv.Total,
-		&inv.Currency,
+		&subtotalCents,
+		&taxCents,
+		&totalCents,
 		&inv.DueDate,
-		&inv.PaidAt,
-		&inv.PDFURL,
-		&inv.StripeInvoiceID,
+		&paidAt,
+		&pdfURL,
+		&stripeInvoiceID,
 		&inv.CreatedAt,
 		&inv.UpdatedAt,
 	)
@@ -127,6 +151,23 @@ func (r *InvoiceRepository) GetInvoice(ctx context.Context, invoiceID, orgID str
 			return nil, fmt.Errorf("invoice not found")
 		}
 		return nil, fmt.Errorf("failed to get invoice: %w", err)
+	}
+
+	// Convert cents to dollars
+	inv.Subtotal = float64(subtotalCents) / 100.0
+	inv.Tax = float64(taxCents) / 100.0
+	inv.Total = float64(totalCents) / 100.0
+	inv.Currency = "USD"
+
+	// Handle nullable fields
+	if pdfURL.Valid {
+		inv.PDFURL = pdfURL.String
+	}
+	if stripeInvoiceID.Valid {
+		inv.StripeInvoiceID = stripeInvoiceID.String
+	}
+	if paidAt.Valid {
+		inv.PaidAt = &paidAt.Time
 	}
 
 	return &inv, nil

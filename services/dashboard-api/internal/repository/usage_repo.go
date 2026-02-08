@@ -21,60 +21,52 @@ func NewUsageRepository(db *sql.DB) *UsageRepository {
 
 // GetCurrentDayUsage retrieves usage metrics for the current day
 func (r *UsageRepository) GetCurrentDayUsage(ctx context.Context, orgID string) (*models.CurrentUsageResponse, error) {
-	today := time.Now().UTC().Format("2006-01-02")
+	today := time.Now().UTC()
+	startOfDay := time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, time.UTC)
 
 	query := `
 		SELECT
-			metric_name,
-			SUM(value) as total_value,
-			unit,
-			COUNT(*) as count,
-			MAX(timestamp) as last_updated
-		FROM usage_metrics
-		WHERE organization_id = $1
-			AND DATE(timestamp) = $2
-		GROUP BY metric_name, unit
-		ORDER BY metric_name
+			COUNT(*) as total_requests,
+			COUNT(*) FILTER (WHERE billable = true) as billable_requests,
+			AVG(response_time_ms)::int as avg_response_time,
+			COUNT(*) FILTER (WHERE status_code >= 400) as error_count,
+			MAX(time) as last_updated
+		FROM usage_events
+		WHERE organization_id = $1::uuid
+			AND time >= $2
 	`
 
-	rows, err := r.db.QueryContext(ctx, query, orgID, today)
-	if err != nil {
+	var totalRequests, billableRequests, avgResponseTime, errorCount int
+	var lastUpdated time.Time
+
+	err := r.db.QueryRowContext(ctx, query, orgID, startOfDay).Scan(
+		&totalRequests,
+		&billableRequests,
+		&avgResponseTime,
+		&errorCount,
+		&lastUpdated,
+	)
+
+	if err != nil && err != sql.ErrNoRows {
 		return nil, fmt.Errorf("failed to query current usage: %w", err)
 	}
-	defer rows.Close()
 
-	var metrics []models.UsageMetricSummary
-	var lastUpdated time.Time
-	var totalCost float64
-
-	for rows.Next() {
-		var metric models.UsageMetricSummary
-		err := rows.Scan(
-			&metric.MetricName,
-			&metric.TotalValue,
-			&metric.Unit,
-			&metric.Count,
-			&lastUpdated,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan usage metric: %w", err)
-		}
-
-		// Calculate cost (this should ideally use the pricing calculator)
-		// For now, using simple estimation
-		metric.Cost = r.estimateCost(metric.MetricName, metric.TotalValue)
-		totalCost += metric.Cost
-
-		metrics = append(metrics, metric)
+	// Create metric summaries
+	metrics := []models.UsageMetricSummary{
+		{
+			MetricName: "api_requests",
+			TotalValue: float64(totalRequests),
+			Unit:       "requests",
+			Count:      totalRequests,
+			Cost:       r.estimateCost("api_requests", float64(billableRequests)),
+		},
 	}
 
-	if err = rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating usage metrics: %w", err)
-	}
+	totalCost := metrics[0].Cost
 
 	response := &models.CurrentUsageResponse{
 		OrganizationID: orgID,
-		Date:           today,
+		Date:           today.Format("2006-01-02"),
 		Metrics:        metrics,
 		TotalCost:      totalCost,
 		UpdatedAt:      lastUpdated,
@@ -90,17 +82,17 @@ func (r *UsageRepository) GetUsageHistory(ctx context.Context, orgID string, day
 
 	query := `
 		SELECT
-			DATE(timestamp) as date,
-			metric_name,
-			SUM(value) as total_value,
-			unit,
-			COUNT(*) as count
-		FROM usage_metrics
-		WHERE organization_id = $1
-			AND timestamp >= $2
-			AND timestamp <= $3
-		GROUP BY DATE(timestamp), metric_name, unit
-		ORDER BY date DESC, metric_name
+			DATE(time) as date,
+			COUNT(*) as total_requests,
+			COUNT(*) FILTER (WHERE billable = true) as billable_requests,
+			AVG(response_time_ms)::int as avg_response_time,
+			COUNT(*) FILTER (WHERE status_code >= 400) as error_count
+		FROM usage_events
+		WHERE organization_id = $1::uuid
+			AND time >= $2
+			AND time <= $3
+		GROUP BY DATE(time)
+		ORDER BY date DESC
 	`
 
 	rows, err := r.db.QueryContext(ctx, query, orgID, startDate, endDate)
@@ -109,20 +101,19 @@ func (r *UsageRepository) GetUsageHistory(ctx context.Context, orgID string, day
 	}
 	defer rows.Close()
 
-	// Group by date
-	dailyUsageMap := make(map[string]*models.DailyUsageSummary)
+	var dailyUsage []models.DailyUsageSummary
 	var totalCost float64
 
 	for rows.Next() {
 		var date time.Time
-		var metric models.UsageMetricSummary
+		var totalRequests, billableRequests, avgResponseTime, errorCount int
 
 		err := rows.Scan(
 			&date,
-			&metric.MetricName,
-			&metric.TotalValue,
-			&metric.Unit,
-			&metric.Count,
+			&totalRequests,
+			&billableRequests,
+			&avgResponseTime,
+			&errorCount,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan usage metric: %w", err)
@@ -130,31 +121,27 @@ func (r *UsageRepository) GetUsageHistory(ctx context.Context, orgID string, day
 
 		dateStr := date.Format("2006-01-02")
 
-		// Calculate cost
-		metric.Cost = r.estimateCost(metric.MetricName, metric.TotalValue)
-
-		// Add to daily summary
-		if dailyUsageMap[dateStr] == nil {
-			dailyUsageMap[dateStr] = &models.DailyUsageSummary{
-				Date:    dateStr,
-				Metrics: []models.UsageMetricSummary{},
-				Cost:    0,
-			}
+		// Create metric summary
+		metric := models.UsageMetricSummary{
+			MetricName: "api_requests",
+			TotalValue: float64(billableRequests),
+			Unit:       "requests",
+			Count:      totalRequests,
+			Cost:       r.estimateCost("api_requests", float64(billableRequests)),
 		}
 
-		dailyUsageMap[dateStr].Metrics = append(dailyUsageMap[dateStr].Metrics, metric)
-		dailyUsageMap[dateStr].Cost += metric.Cost
+		summary := models.DailyUsageSummary{
+			Date:    dateStr,
+			Metrics: []models.UsageMetricSummary{metric},
+			Cost:    metric.Cost,
+		}
+
+		dailyUsage = append(dailyUsage, summary)
 		totalCost += metric.Cost
 	}
 
 	if err = rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating usage history: %w", err)
-	}
-
-	// Convert map to slice
-	var dailyUsage []models.DailyUsageSummary
-	for _, summary := range dailyUsageMap {
-		dailyUsage = append(dailyUsage, *summary)
 	}
 
 	response := &models.UsageHistoryResponse{
@@ -173,16 +160,19 @@ func (r *UsageRepository) GetUsageByMetric(ctx context.Context, orgID, metricNam
 	startDate := time.Now().UTC().AddDate(0, 0, -days)
 
 	query := `
-		SELECT metric_name, value, unit, timestamp
-		FROM usage_metrics
-		WHERE organization_id = $1
-			AND metric_name = $2
-			AND timestamp >= $3
-		ORDER BY timestamp DESC
+		SELECT 'api_requests' as metric_name,
+		       CAST(COUNT(*) FILTER (WHERE billable = true) as FLOAT) as value,
+		       'requests' as unit,
+		       time as timestamp
+		FROM usage_events
+		WHERE organization_id = $1::uuid
+			AND time >= $2
+		GROUP BY time
+		ORDER BY time DESC
 		LIMIT 1000
 	`
 
-	rows, err := r.db.QueryContext(ctx, query, orgID, metricName, startDate)
+	rows, err := r.db.QueryContext(ctx, query, orgID, startDate)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query metric usage: %w", err)
 	}

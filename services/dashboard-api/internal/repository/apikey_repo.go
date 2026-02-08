@@ -26,9 +26,9 @@ func NewAPIKeyRepository(db *sql.DB) *APIKeyRepository {
 func (r *APIKeyRepository) ListAPIKeys(ctx context.Context, orgID string) ([]models.APIKey, error) {
 	query := `
 		SELECT id, organization_id, name, key_prefix, last_used_at,
-		       created_at, expires_at, revoked_at, status, created_by
+		       created_at, expires_at, revoked_at, is_active, created_by
 		FROM api_keys
-		WHERE organization_id = $1
+		WHERE organization_id = $1::uuid
 		ORDER BY created_at DESC
 	`
 
@@ -41,6 +41,8 @@ func (r *APIKeyRepository) ListAPIKeys(ctx context.Context, orgID string) ([]mod
 	var keys []models.APIKey
 	for rows.Next() {
 		var key models.APIKey
+		var isActive bool
+		var createdBy sql.NullString
 		err := rows.Scan(
 			&key.ID,
 			&key.OrganizationID,
@@ -50,12 +52,27 @@ func (r *APIKeyRepository) ListAPIKeys(ctx context.Context, orgID string) ([]mod
 			&key.CreatedAt,
 			&key.ExpiresAt,
 			&key.RevokedAt,
-			&key.Status,
-			&key.CreatedBy,
+			&isActive,
+			&createdBy,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan API key: %w", err)
 		}
+
+		// Handle nullable created_by
+		if createdBy.Valid {
+			key.CreatedBy = createdBy.String
+		}
+
+		// Derive status from is_active, revoked_at, and expires_at
+		if !isActive && key.RevokedAt != nil {
+			key.Status = "revoked"
+		} else if key.ExpiresAt != nil && key.ExpiresAt.Before(time.Now()) {
+			key.Status = "expired"
+		} else {
+			key.Status = "active"
+		}
+
 		keys = append(keys, key)
 	}
 
@@ -79,16 +96,18 @@ func (r *APIKeyRepository) CreateAPIKey(ctx context.Context, orgID, name, userID
 	// Extract prefix (first 8 characters for display)
 	keyPrefix := fullKey[:8]
 
-	// Determine status
+	// Determine is_active (should be true for new keys unless already expired)
+	isActive := true
 	status := "active"
 	if expiresAt != nil && expiresAt.Before(time.Now()) {
+		isActive = false
 		status = "expired"
 	}
 
 	// Insert into database
 	query := `
-		INSERT INTO api_keys (organization_id, name, key_prefix, key_hash, expires_at, status, created_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO api_keys (organization_id, name, key_prefix, key_hash, expires_at, is_active, created_by)
+		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7)
 		RETURNING id, created_at
 	`
 
@@ -108,7 +127,7 @@ func (r *APIKeyRepository) CreateAPIKey(ctx context.Context, orgID, name, userID
 		apiKey.KeyPrefix,
 		apiKey.KeyHash,
 		apiKey.ExpiresAt,
-		apiKey.Status,
+		isActive,
 		apiKey.CreatedBy,
 	).Scan(&apiKey.ID, &apiKey.CreatedAt)
 
@@ -123,8 +142,8 @@ func (r *APIKeyRepository) CreateAPIKey(ctx context.Context, orgID, name, userID
 func (r *APIKeyRepository) RevokeAPIKey(ctx context.Context, keyID, orgID string) error {
 	query := `
 		UPDATE api_keys
-		SET status = 'revoked', revoked_at = $1
-		WHERE id = $2 AND organization_id = $3
+		SET is_active = false, revoked_at = $1
+		WHERE id = $2::uuid AND organization_id = $3::uuid
 	`
 
 	result, err := r.db.ExecContext(ctx, query, time.Now(), keyID, orgID)
@@ -148,12 +167,14 @@ func (r *APIKeyRepository) RevokeAPIKey(ctx context.Context, keyID, orgID string
 func (r *APIKeyRepository) GetAPIKey(ctx context.Context, keyID, orgID string) (*models.APIKey, error) {
 	query := `
 		SELECT id, organization_id, name, key_prefix, last_used_at,
-		       created_at, expires_at, revoked_at, status, created_by
+		       created_at, expires_at, revoked_at, is_active, created_by
 		FROM api_keys
-		WHERE id = $1 AND organization_id = $2
+		WHERE id = $1::uuid AND organization_id = $2::uuid
 	`
 
 	var key models.APIKey
+	var isActive bool
+	var createdBy sql.NullString
 	err := r.db.QueryRowContext(ctx, query, keyID, orgID).Scan(
 		&key.ID,
 		&key.OrganizationID,
@@ -163,8 +184,8 @@ func (r *APIKeyRepository) GetAPIKey(ctx context.Context, keyID, orgID string) (
 		&key.CreatedAt,
 		&key.ExpiresAt,
 		&key.RevokedAt,
-		&key.Status,
-		&key.CreatedBy,
+		&isActive,
+		&createdBy,
 	)
 
 	if err != nil {
@@ -172,6 +193,20 @@ func (r *APIKeyRepository) GetAPIKey(ctx context.Context, keyID, orgID string) (
 			return nil, fmt.Errorf("API key not found")
 		}
 		return nil, fmt.Errorf("failed to get API key: %w", err)
+	}
+
+	// Handle nullable created_by
+	if createdBy.Valid {
+		key.CreatedBy = createdBy.String
+	}
+
+	// Derive status from is_active, revoked_at, and expires_at
+	if !isActive && key.RevokedAt != nil {
+		key.Status = "revoked"
+	} else if key.ExpiresAt != nil && key.ExpiresAt.Before(time.Now()) {
+		key.Status = "expired"
+	} else {
+		key.Status = "active"
 	}
 
 	return &key, nil
@@ -182,7 +217,7 @@ func (r *APIKeyRepository) ValidateAPIKey(ctx context.Context, fullKey string) (
 	keyPrefix := fullKey[:8]
 
 	query := `
-		SELECT id, organization_id, key_hash, status, expires_at
+		SELECT id, organization_id, key_hash, is_active, expires_at, revoked_at
 		FROM api_keys
 		WHERE key_prefix = $1
 	`
@@ -195,16 +230,17 @@ func (r *APIKeyRepository) ValidateAPIKey(ctx context.Context, fullKey string) (
 
 	// Check each key with matching prefix
 	for rows.Next() {
-		var id, orgID, keyHash, status string
-		var expiresAt *time.Time
+		var id, orgID, keyHash string
+		var isActive bool
+		var expiresAt, revokedAt *time.Time
 
-		err := rows.Scan(&id, &orgID, &keyHash, &status, &expiresAt)
+		err := rows.Scan(&id, &orgID, &keyHash, &isActive, &expiresAt, &revokedAt)
 		if err != nil {
 			continue
 		}
 
 		// Check if key is active
-		if status != "active" {
+		if !isActive || revokedAt != nil {
 			continue
 		}
 

@@ -2,11 +2,9 @@ package handlers
 
 import (
 	"database/sql"
-	"encoding/json"
 	"net/http"
 	"strconv"
 
-	"github.com/devwithmohit/billing-system/services/dashboard-api/internal/models"
 	"github.com/devwithmohit/billing-system/services/dashboard-api/internal/repository"
 )
 
