@@ -101,6 +101,11 @@ func (a *Auth) Middleware(next http.Handler) http.Handler {
 	}		// Create request context
 		reqCtx := &models.RequestContext{
 			APIKey:    apiKey,
+			RateLimit: models.RateLimit{
+				RequestsPerMinute: cachedKey.RateLimitConfig.RequestsPerMinute,
+				RequestsPerDay:    cachedKey.RateLimitConfig.RequestsPerDay,
+				BurstSize:         cachedKey.RateLimitConfig.BurstSize,
+			},
 			RequestID: uuid.New().String(),
 			StartTime: now,
 			ClientIP:  getClientIP(r),

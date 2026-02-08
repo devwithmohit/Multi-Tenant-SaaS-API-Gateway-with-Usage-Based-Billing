@@ -34,8 +34,8 @@ func (rl *RateLimit) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// Get rate limit configuration from API key
-		config := reqCtx.APIKey.RateLimitConfig()
+		// Get rate limit configuration from request context (database-driven)
+		config := reqCtx.RateLimit
 
 		// Check rate limit
 		ctx, cancel := context.WithTimeout(r.Context(), 100*time.Millisecond)

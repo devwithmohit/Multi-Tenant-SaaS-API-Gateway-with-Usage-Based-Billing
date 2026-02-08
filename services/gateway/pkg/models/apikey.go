@@ -71,6 +71,7 @@ type RateLimit struct {
 // RequestContext holds metadata about the current request
 type RequestContext struct {
 	APIKey         *APIKey
+	RateLimit      RateLimit // Database-driven rate limits
 	RequestID      string
 	StartTime      time.Time
 	ClientIP       string
