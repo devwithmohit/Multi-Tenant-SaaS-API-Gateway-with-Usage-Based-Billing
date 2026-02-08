@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"gateway/internal/cache"
+	"github.com/saas-gateway/gateway/internal/cache"
 
 	_ "github.com/lib/pq"
 )
@@ -30,7 +30,7 @@ func (r *Repository) FetchAllAPIKeys(ctx context.Context) (map[string]*cache.Cac
 			ak.organization_id,
 			COALESCE(rl.requests_per_minute, 60) as requests_per_minute,
 			COALESCE(rl.requests_per_day, 10000) as requests_per_day,
-			COALESCE(rl.burst_size, 10) as burst_size
+			COALESCE(rl.burst_allowance, 10) as burst_allowance
 		FROM api_keys ak
 		LEFT JOIN rate_limit_configs rl ON ak.organization_id = rl.organization_id
 		WHERE ak.is_active = true
@@ -79,7 +79,7 @@ func (r *Repository) GetAPIKey(ctx context.Context, keyHash string) (*cache.Cach
 			ak.organization_id,
 			COALESCE(rl.requests_per_minute, 60) as requests_per_minute,
 			COALESCE(rl.requests_per_day, 10000) as requests_per_day,
-			COALESCE(rl.burst_size, 10) as burst_size
+			COALESCE(rl.burst_allowance, 10) as burst_allowance
 		FROM api_keys ak
 		LEFT JOIN rate_limit_configs rl ON ak.organization_id = rl.organization_id
 		WHERE ak.key_hash = $1

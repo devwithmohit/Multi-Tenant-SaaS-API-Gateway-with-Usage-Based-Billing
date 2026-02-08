@@ -98,6 +98,11 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Strip service prefix from path if service name was extracted
+	if serviceName != "" && strings.HasPrefix(r.URL.Path, "/"+serviceName+"/") {
+		r.URL.Path = strings.TrimPrefix(r.URL.Path, "/"+serviceName)
+	}
+
 	// Create response writer wrapper to capture status code
 	rw := &responseWriter{
 		ResponseWriter: w,

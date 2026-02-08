@@ -52,21 +52,19 @@ func Load() (*Config, error) {
 		cfg.BackendURLs[parts[0]] = parts[1]
 	}
 
-	// Parse temporary API keys
+	// Parse temporary API keys (optional - primarily using database-driven auth)
 	apiKeysStr := os.Getenv("VALID_API_KEYS")
-	if apiKeysStr == "" {
-		return nil, fmt.Errorf("VALID_API_KEYS environment variable is required")
-	}
-
-	for _, keyConfig := range strings.Split(apiKeysStr, ",") {
-		parts := strings.Split(strings.TrimSpace(keyConfig), ":")
-		if len(parts) != 3 {
-			return nil, fmt.Errorf("invalid API key format (expected key:org_id:tier): %s", keyConfig)
-		}
-		cfg.APIKeys[parts[0]] = &APIKeyConfig{
-			Key:            parts[0],
-			OrganizationID: parts[1],
-			PlanTier:       parts[2],
+	if apiKeysStr != "" {
+		for _, keyConfig := range strings.Split(apiKeysStr, ",") {
+			parts := strings.Split(strings.TrimSpace(keyConfig), ":")
+			if len(parts) != 3 {
+				return nil, fmt.Errorf("invalid API key format (expected key:org_id:tier): %s", keyConfig)
+			}
+			cfg.APIKeys[parts[0]] = &APIKeyConfig{
+				Key:            parts[0],
+				OrganizationID: parts[1],
+				PlanTier:       parts[2],
+			}
 		}
 	}
 
