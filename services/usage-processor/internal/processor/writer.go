@@ -11,14 +11,14 @@ import (
 
 // UsageEvent represents a usage event to be written to TimescaleDB
 type UsageEvent struct {
-	Time            time.Time `json:"time"`
 	RequestID       string    `json:"request_id"`
 	OrganizationID  string    `json:"organization_id"`
 	APIKeyID        string    `json:"api_key_id"`
 	Endpoint        string    `json:"endpoint"`
 	Method          string    `json:"method"`
 	StatusCode      int       `json:"status_code"`
-	ResponseTimeMs  int       `json:"response_time_ms"`
+	ResponseTimeMs  int64     `json:"response_time_ms"`
+	Timestamp       time.Time `json:"timestamp"`
 	Billable        bool      `json:"billable"`
 	Weight          int       `json:"weight"`
 }
@@ -77,7 +77,7 @@ func (w *Writer) WriteBatch(events []UsageEvent) error {
 	duplicates := 0
 	for _, event := range events {
 		_, err = stmt.Exec(
-			event.Time,
+			event.Timestamp,
 			event.RequestID,
 			event.OrganizationID,
 			event.APIKeyID,

@@ -14,6 +14,7 @@ type RateLimitConfig struct {
 
 // CachedKey represents a cached API key with its associated data
 type CachedKey struct {
+	APIKeyID        string
 	OrganizationID  string
 	RateLimitConfig RateLimitConfig
 	ExpiresAt       time.Time

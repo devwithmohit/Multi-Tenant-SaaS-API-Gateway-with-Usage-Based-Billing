@@ -27,6 +27,7 @@ func (r *Repository) FetchAllAPIKeys(ctx context.Context) (map[string]*cache.Cac
 	query := `
 		SELECT
 			ak.key_hash,
+			ak.id,
 			ak.organization_id,
 			COALESCE(rl.requests_per_minute, 60) as requests_per_minute,
 			COALESCE(rl.requests_per_day, 10000) as requests_per_day,
@@ -46,15 +47,16 @@ func (r *Repository) FetchAllAPIKeys(ctx context.Context) (map[string]*cache.Cac
 	keys := make(map[string]*cache.CachedKey)
 
 	for rows.Next() {
-		var keyHash, orgID string
+		var keyHash, apiKeyID, orgID string
 		var reqsPerMinute, reqsPerDay, burstSize int
 
-		err := rows.Scan(&keyHash, &orgID, &reqsPerMinute, &reqsPerDay, &burstSize)
+		err := rows.Scan(&keyHash, &apiKeyID, &orgID, &reqsPerMinute, &reqsPerDay, &burstSize)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
 
 		keys[keyHash] = &cache.CachedKey{
+			APIKeyID:       apiKeyID,
 			OrganizationID: orgID,
 			RateLimitConfig: cache.RateLimitConfig{
 				RequestsPerMinute: reqsPerMinute,
@@ -76,6 +78,7 @@ func (r *Repository) FetchAllAPIKeys(ctx context.Context) (map[string]*cache.Cac
 func (r *Repository) GetAPIKey(ctx context.Context, keyHash string) (*cache.CachedKey, error) {
 	query := `
 		SELECT
+			ak.id,
 			ak.organization_id,
 			COALESCE(rl.requests_per_minute, 60) as requests_per_minute,
 			COALESCE(rl.requests_per_day, 10000) as requests_per_day,
@@ -87,11 +90,11 @@ func (r *Repository) GetAPIKey(ctx context.Context, keyHash string) (*cache.Cach
 		  AND ak.revoked_at IS NULL
 	`
 
-	var orgID string
+	var apiKeyID, orgID string
 	var reqsPerMinute, reqsPerDay, burstSize int
 
 	err := r.db.QueryRowContext(ctx, query, keyHash).Scan(
-		&orgID, &reqsPerMinute, &reqsPerDay, &burstSize,
+		&apiKeyID, &orgID, &reqsPerMinute, &reqsPerDay, &burstSize,
 	)
 
 	if err == sql.ErrNoRows {
@@ -103,6 +106,7 @@ func (r *Repository) GetAPIKey(ctx context.Context, keyHash string) (*cache.Cach
 	}
 
 	return &cache.CachedKey{
+		APIKeyID:       apiKeyID,
 		OrganizationID: orgID,
 		RateLimitConfig: cache.RateLimitConfig{
 			RequestsPerMinute: reqsPerMinute,

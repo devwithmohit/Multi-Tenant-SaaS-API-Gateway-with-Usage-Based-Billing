@@ -89,8 +89,17 @@ func (a *Auth) Middleware(next http.Handler) http.Handler {
 
 	// Create API key model
 	now := time.Now()
+
+	// Parse the API key ID from cache
+	apiKeyID, err := uuid.Parse(cachedKey.APIKeyID)
+	if err != nil {
+		log.Printf("[Auth] Invalid API key ID format: %v", err)
+		a.respondError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
 	apiKey := &models.APIKey{
-		ID:             uuid.New(),
+		ID:             apiKeyID,
 		Key:            apiKeyStr,
 		OrganizationID: cachedKey.OrganizationID,
 		PlanTier:       "free", // TODO: Get from database

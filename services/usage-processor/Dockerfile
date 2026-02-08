@@ -1,8 +1,13 @@
 # Multi-stage build for minimal image size
-FROM golang:1.21-alpine AS builder
+FROM golang:1.24-bullseye AS builder
 
-# Install build dependencies
-RUN apk add --no-cache gcc musl-dev
+# Install build dependencies for librdkafka
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    librdkafka-dev \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
 
@@ -15,14 +20,17 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build the binary
-RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o usage-processor ./cmd/consumer
+# Build the binary with CGO enabled
+RUN CGO_ENABLED=1 GOOS=linux go build -o usage-processor ./cmd/consumer
 
 # Final stage
-FROM alpine:3.19
+FROM debian:bullseye-slim
 
 # Install runtime dependencies
-RUN apk add --no-cache ca-certificates tzdata
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    librdkafka1 \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -30,8 +38,8 @@ WORKDIR /app
 COPY --from=builder /build/usage-processor .
 
 # Create non-root user
-RUN addgroup -g 1000 processor && \
-    adduser -D -u 1000 -G processor processor && \
+RUN groupadd -g 1000 processor && \
+    useradd -u 1000 -g processor -s /bin/bash -m processor && \
     chown -R processor:processor /app
 
 USER processor
