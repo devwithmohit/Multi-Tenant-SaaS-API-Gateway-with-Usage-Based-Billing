@@ -1,7 +1,5 @@
 # Multi-Tenant SaaS API Gateway with Usage-Based Billing
 
-🚧 **This project is currently under active development. Documentation and features are subject to change.**
-
 Production-grade API Gateway for SaaS companies with rate limiting, usage tracking, and automated billing.
 
 ## Project Status
