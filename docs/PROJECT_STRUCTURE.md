@@ -1,32 +1,32 @@
 # PROJECT_STRUCTURE.md — Recommended Directory Tree
 
 > Complete recommended directory structure for the Multi-Tenant SaaS API Gateway.
-> Includes both existing files and recommended additions (marked with `← NEW`).
+> Includes both existing files and recommended additions.
 
 ```
 Multi-Tenant-SaaS-API-Gateway-with-Usage-Based-Billing/
 │
 ├── README.md
 ├── LICENSE
-├── docker-compose.yml                          ← NEW (full-stack local dev)
-├── Makefile                                    ← NEW (build/test/lint targets)
-├── .github/                                    ← NEW
+├── docker-compose.yml
+├── Makefile
+├── .github/
 │   └── workflows/
-│       ├── ci.yml                              ← NEW (lint + test + build)
-│       └── release.yml                         ← NEW (tag → Docker push → deploy)
+│       ├── ci.yml
+│       └── release.yml
 │
 ├── docs/
 │   ├── project-requirements-document.md
 │   ├── system-design.md
 │   ├── project-constraints.md
 │   ├── modules-breakdown.md
-│   ├── api-contracts.md                        ← NEW (Phase 2 deliverable)
-│   ├── db-schema.md                            ← NEW (Phase 2 deliverable)
-│   ├── expected-behavior.md                    ← NEW (Phase 2 deliverable)
-│   ├── implementation-gap-report.md            ← NEW (Phase 3 deliverable)
-│   ├── recovery-plan.md                        ← NEW (Phase 4 deliverable)
-│   ├── PROJECT_STRUCTURE.md                    ← NEW (this file)
-│   └── openapi.yaml                            ← NEW (OpenAPI 3.0 spec)
+│   ├── api-contracts.md
+│   ├── db-schema.md
+│   ├── expected-behavior.md
+│   ├── implementation-gap-report.md
+│   ├── recovery-plan.md
+│   ├── PROJECT_STRUCTURE.md
+│   └── openapi.yaml
 │
 ├── db/
 │   ├── docker-compose.yml
@@ -46,22 +46,22 @@ Multi-Tenant-SaaS-API-Gateway-with-Usage-Based-Billing/
 │   │   ├── 005_create_pricing_plans.down.sql
 │   │   ├── 006_create_invoices.up.sql
 │   │   ├── 006_create_invoices.down.sql
-│   │   ├── 007_create_dashboard_tables.up.sql   (⚠ needs fix: remove duplicate api_keys)
+│   │   ├── 007_create_dashboard_tables.up.sql
 │   │   ├── 007_create_dashboard_tables.down.sql
-│   │   ├── 008_alter_api_keys_add_columns.up.sql       ← NEW
-│   │   ├── 008_alter_api_keys_add_columns.down.sql      ← NEW
-│   │   ├── 009_fix_subscription_org_id_type.up.sql      ← NEW
-│   │   ├── 009_fix_subscription_org_id_type.down.sql     ← NEW
-│   │   ├── 010_alter_organizations_add_status.up.sql    ← NEW
-│   │   ├── 010_alter_organizations_add_status.down.sql   ← NEW
-│   │   ├── 011_add_billing_unique_constraint.up.sql     ← NEW
-│   │   ├── 011_add_billing_unique_constraint.down.sql    ← NEW
-│   │   ├── 012_create_webhooks_and_alerts.up.sql        ← NEW
-│   │   ├── 012_create_webhooks_and_alerts.down.sql       ← NEW
-│   │   ├── 013_create_rls_policies.up.sql               ← NEW
-│   │   ├── 013_create_rls_policies.down.sql              ← NEW
-│   │   └── 014_create_audit_log.up.sql                  ← NEW
-│   │   └── 014_create_audit_log.down.sql                 ← NEW
+│   │   ├── 008_alter_api_keys_add_columns.up.sql
+│   │   ├── 008_alter_api_keys_add_columns.down.sql
+│   │   ├── 009_fix_subscription_org_id_type.up.sql
+│   │   ├── 009_fix_subscription_org_id_type.down.sql
+│   │   ├── 010_alter_organizations_add_status.up.sql
+│   │   ├── 010_alter_organizations_add_status.down.sql
+│   │   ├── 011_add_billing_unique_constraint.up.sql
+│   │   ├── 011_add_billing_unique_constraint.down.sql
+│   │   ├── 012_create_webhooks_and_alerts.up.sql
+│   │   ├── 012_create_webhooks_and_alerts.down.sql
+│   │   ├── 013_create_rls_policies.up.sql
+│   │   ├── 013_create_rls_policies.down.sql
+│   │   └── 014_create_audit_log.up.sql
+│   │   └── 014_create_audit_log.down.sql
 │   └── scripts/
 │       ├── setup.sh
 │       └── setup.ps1
@@ -84,7 +84,7 @@ Multi-Tenant-SaaS-API-Gateway-with-Usage-Based-Billing/
 │   │   │   │   ├── auth.go
 │   │   │   │   ├── cors.go
 │   │   │   │   ├── logging.go
-│   │   │   │   ├── metrics.go                  (⚠ rename from .bak, activate)
+│   │   │   │   ├── metrics.go
 │   │   │   │   ├── ratelimit.go
 │   │   │   │   └── recovery.go
 │   │   │   ├── handler/
@@ -94,12 +94,12 @@ Multi-Tenant-SaaS-API-Gateway-with-Usage-Based-Billing/
 │   │   │   │   └── limiter.go
 │   │   │   ├── events/
 │   │   │   │   ├── producer.go
-│   │   │   │   └── disk_buffer.go              ← NEW (Kafka failover)
+│   │   │   │   └── disk_buffer.go
 │   │   │   ├── cache/
 │   │   │   │   ├── api_key_cache.go
-│   │   │   │   ├── redis_cache.go              ← NEW (Redis caching layer)
+│   │   │   │   ├── redis_cache.go
 │   │   │   │   ├── refresh_manager.go
-│   │   │   │   └── invalidation.go             ← NEW (Redis pub/sub)
+│   │   │   │   └── invalidation.go
 │   │   │   └── models/
 │   │   │       └── models.go
 │   │   ├── pkg/
@@ -118,15 +118,15 @@ Multi-Tenant-SaaS-API-Gateway-with-Usage-Based-Billing/
 │   │   │       └── main.go
 │   │   └── internal/
 │   │       ├── config/
-│   │       │   └── config.go                   ← NEW
+│   │       │   └── config.go
 │   │       └── processor/
 │   │           ├── deduplicator.go
 │   │           ├── writer.go
-│   │           ├── enricher.go                 ← NEW (event enrichment)
-│   │           └── dlq.go                      ← NEW (dead-letter queue)
+│   │           ├── enricher.go
+│   │           └── dlq.go
 │   │
 │   ├── billing-engine/
-│   │   ├── Dockerfile                          ← NEW
+│   │   ├── Dockerfile
 │   │   ├── go.mod
 │   │   ├── go.sum
 │   │   ├── README.md
@@ -138,27 +138,27 @@ Multi-Tenant-SaaS-API-Gateway-with-Usage-Based-Billing/
 │   │   │   │   └── config.go
 │   │   │   ├── aggregator/
 │   │   │   │   ├── hourly.go
-│   │   │   │   └── reconciler.go               ← NEW
+│   │   │   │   └── reconciler.go
 │   │   │   ├── pricing/
 │   │   │   │   ├── calculator.go
-│   │   │   │   └── calculator_test.go          ← NEW
+│   │   │   │   └── calculator_test.go
 │   │   │   ├── invoice/
 │   │   │   │   ├── generator.go
 │   │   │   │   ├── pdf.go
 │   │   │   │   ├── stripe.go
 │   │   │   │   ├── email.go
 │   │   │   │   ├── storage.go
-│   │   │   │   └── retry.go                    ← NEW (payment retry)
+│   │   │   │   └── retry.go
 │   │   │   ├── webhook/
-│   │   │   │   └── dispatcher.go               ← NEW
+│   │   │   │   └── dispatcher.go
 │   │   │   └── alerts/
-│   │   │       └── evaluator.go                ← NEW
+│   │   │       └── evaluator.go
 │   │   └── docs/
 │   │       ├── cron-jobs.md
 │   │       └── module-4.3-summary.md
 │   │
 │   └── dashboard-api/
-│       ├── Dockerfile                          ← NEW
+│       ├── Dockerfile
 │       ├── go.mod
 │       ├── go.sum
 │       ├── README.md
@@ -174,25 +174,25 @@ Multi-Tenant-SaaS-API-Gateway-with-Usage-Based-Billing/
 │           │   ├── usage.go
 │           │   ├── apikeys.go
 │           │   ├── invoices.go
-│           │   ├── webhooks.go                 ← NEW
-│           │   ├── alerts.go                   ← NEW
-│           │   ├── members.go                  ← NEW
-│           │   ├── plan.go                     ← NEW
-│           │   └── gdpr.go                     ← NEW
+│           │   ├── webhooks.go
+│           │   ├── alerts.go
+│           │   ├── members.go
+│           │   ├── plan.go
+│           │   └── gdpr.go
 │           ├── middleware/
 │           │   ├── tenant_context.go
-│           │   ├── rbac.go                     ← NEW
-│           │   └── audit.go                    ← NEW
+│           │   ├── rbac.go
+│           │   └── audit.go
 │           ├── models/
 │           │   └── models.go
 │           └── repository/
 │               ├── apikey_repo.go
 │               ├── usage_repo.go
 │               ├── invoice_repo.go
-│               ├── webhook_repo.go             ← NEW
-│               ├── alert_repo.go               ← NEW
-│               ├── member_repo.go              ← NEW
-│               └── audit_repo.go               ← NEW
+│               ├── webhook_repo.go
+│               ├── alert_repo.go
+│               ├── member_repo.go
+│               └── audit_repo.go
 │
 ├── tools/
 │   └── keygen/
@@ -234,35 +234,35 @@ Multi-Tenant-SaaS-API-Gateway-with-Usage-Based-Billing/
 │           ├── api/
 │           │   └── client.ts
 │           ├── components/
-│           │   ├── Layout.tsx                  ← NEW (sidebar + navigation)
+│           │   ├── Layout.tsx
 │           │   ├── UsageChart.tsx
 │           │   ├── RateLimitGauge.tsx
-│           │   ├── DateRangePicker.tsx          ← NEW
-│           │   ├── ErrorBoundary.tsx            ← NEW
-│           │   └── Toast.tsx                    ← NEW
+│           │   ├── DateRangePicker.tsx
+│           │   ├── ErrorBoundary.tsx
+│           │   └── Toast.tsx
 │           ├── hooks/
-│           │   ├── useAuth.ts                  ← NEW
-│           │   └── useAutoRefresh.ts           ← NEW
+│           │   ├── useAuth.ts
+│           │   └── useAutoRefresh.ts
 │           └── pages/
 │               ├── Login.tsx
-│               ├── Register.tsx                ← NEW
+│               ├── Register.tsx
 │               ├── UsageDashboard.tsx
 │               ├── APIKeys.tsx
 │               ├── Invoices.tsx
-│               ├── Settings.tsx                ← NEW
-│               ├── Webhooks.tsx                ← NEW
-│               └── Alerts.tsx                  ← NEW
+│               ├── Settings.tsx
+│               ├── Webhooks.tsx
+│               └── Alerts.tsx
 │
-├── tests/                                      ← NEW
+├── tests/
 │   ├── integration/
-│   │   ├── gateway_test.go                     ← NEW
-│   │   ├── billing_test.go                     ← NEW
-│   │   └── usage_pipeline_test.go              ← NEW
+│   │   ├── gateway_test.go
+│   │   ├── billing_test.go
+│   │   └── usage_pipeline_test.go
 │   ├── e2e/
-│   │   └── full_journey_test.go                ← NEW
+│   │   └── full_journey_test.go
 │   └── load/
-│       ├── k6_gateway.js                       ← NEW
-│       └── k6_dashboard.js                     ← NEW
+│       ├── k6_gateway.js
+│       └── k6_dashboard.js
 │
 ├── infra/
 │   ├── k8s/
@@ -279,7 +279,7 @@ Multi-Tenant-SaaS-API-Gateway-with-Usage-Based-Billing/
 │   │   │   └── deployment.yaml
 │   │   ├── dashboard-api/
 │   │   │   ├── deployment.yaml
-│   │   │   └── service.yaml                    ← NEW
+│   │   │   └── service.yaml
 │   │   └── billing-engine/
 │   │       └── cronjob.yaml
 │   └── monitoring/
@@ -304,17 +304,3 @@ Multi-Tenant-SaaS-API-Gateway-with-Usage-Based-Billing/
     └── (runtime logs, gitignored)
 ```
 
-## Summary of New Files
-
-| Category        | New Files         | Purpose                                         |
-| --------------- | ----------------- | ----------------------------------------------- |
-| CI/CD           | 3                 | GitHub Actions, Makefile                        |
-| Documentation   | 7                 | Audit deliverables, OpenAPI spec                |
-| Migrations      | 14                | Schema fixes, new tables, RLS                   |
-| Gateway         | 4                 | Redis cache, pub/sub, disk buffer               |
-| Usage Processor | 3                 | Enricher, DLQ, config                           |
-| Billing Engine  | 5                 | Retry, reconciler, webhooks, alerts, Dockerfile |
-| Dashboard API   | 12                | Missing endpoints, RBAC, audit, Dockerfile      |
-| Web Dashboard   | 10                | Pages, components, hooks                        |
-| Tests           | 5                 | Integration, E2E, load                          |
-| **Total**       | **~63 new files** |                                                 |
