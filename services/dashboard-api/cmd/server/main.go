@@ -49,6 +49,7 @@ func main() {
 	memberHandler := handlers.NewMemberHandler(db)
 	planHandler := handlers.NewPlanHandler(db)
 	gdprHandler := handlers.NewGDPRHandler(db)
+	orgHandler := handlers.NewOrganizationHandler(db)
 
 	// Initialize middleware
 	auditMiddleware := middleware.NewAuditMiddleware(db)
@@ -83,7 +84,11 @@ func main() {
 	// Public routes (no authentication required)
 	r.Route("/api/v1/auth", func(r chi.Router) {
 		r.Post("/login", authHandler.Login)
+		r.Post("/register", authHandler.Register)
 	})
+
+	// Public: list available pricing plans (no auth needed)
+	r.Get("/api/v1/plans", planHandler.ListPlans)
 
 	// Protected routes (authentication required)
 	r.Route("/api/v1", func(r chi.Router) {
@@ -102,6 +107,7 @@ func main() {
 			r.Get("/current", usageHandler.GetCurrentUsage)
 			r.Get("/history", usageHandler.GetUsageHistory)
 			r.Get("/metrics", usageHandler.GetUsageByMetric)
+			r.Get("/export", usageHandler.ExportUsage)
 		})
 
 		// API Key endpoints
@@ -110,6 +116,7 @@ func main() {
 			r.Post("/", apiKeyHandler.CreateAPIKey)
 			r.Get("/{id}", apiKeyHandler.GetAPIKey)
 			r.Delete("/{id}", apiKeyHandler.RevokeAPIKey)
+			r.Post("/{id}/rotate", apiKeyHandler.RotateAPIKey)
 		})
 
 		// Invoice endpoints
@@ -144,6 +151,14 @@ func main() {
 				r.Delete("/{memberId}", memberHandler.RemoveMember)
 			})
 		})
+
+		// Plan endpoints (Sprint 5.2)
+		r.Get("/plan", planHandler.GetCurrentPlan)
+		r.Put("/plan", planHandler.UpdatePlan)
+
+		// Organization profile (API Contract §2.7)
+		r.Get("/organization", orgHandler.GetOrganization)
+		r.Put("/organization", orgHandler.UpdateOrganization)
 
 		// GDPR endpoints (Sprint 5.7)
 		r.Route("/gdpr", func(r chi.Router) {

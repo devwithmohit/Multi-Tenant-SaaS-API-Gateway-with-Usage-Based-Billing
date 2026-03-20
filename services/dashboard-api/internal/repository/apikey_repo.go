@@ -275,3 +275,46 @@ func (r *APIKeyRepository) generateAPIKey() (string, error) {
 	}
 	return "sk_" + hex.EncodeToString(bytes), nil
 }
+
+// RotateAPIKey creates a new key and schedules revocation of the old key.
+// Sprint 5.1 — old key has a 5-minute grace period before revocation.
+func (r *APIKeyRepository) RotateAPIKey(ctx context.Context, keyID, orgID, userID string) (*models.APIKey, string, time.Time, error) {
+	// 1. Verify old key exists and is active
+	oldKey, err := r.GetAPIKey(ctx, keyID, orgID)
+	if err != nil {
+		return nil, "", time.Time{}, fmt.Errorf("old key lookup: %w", err)
+	}
+	if oldKey.Status != "active" {
+		return nil, "", time.Time{}, fmt.Errorf("cannot rotate a %s key", oldKey.Status)
+	}
+
+	// 2. Create the new key
+	newKey, fullKey, err := r.CreateAPIKey(ctx, orgID, oldKey.Name+" (rotated)", userID, nil)
+	if err != nil {
+		return nil, "", time.Time{}, fmt.Errorf("create new key: %w", err)
+	}
+
+	// 3. Schedule old key revocation (5-minute grace period)
+	revokeAt := time.Now().Add(5 * time.Minute)
+	_, err = r.db.ExecContext(ctx,
+		`UPDATE api_keys
+		 SET revoked_at = $1, revoked_reason = 'rotated',
+		     updated_at = NOW()
+		 WHERE id = $2::uuid AND organization_id = $3::uuid`,
+		revokeAt, keyID, orgID,
+	)
+	if err != nil {
+		return nil, "", time.Time{}, fmt.Errorf("schedule old key revocation: %w", err)
+	}
+
+	// 4. Background goroutine to actually deactivate after grace period
+	go func() {
+		time.Sleep(5 * time.Minute)
+		_, _ = r.db.Exec(
+			`UPDATE api_keys SET is_active = false WHERE id = $1::uuid AND revoked_reason = 'rotated'`,
+			keyID,
+		)
+	}()
+
+	return newKey, fullKey, revokeAt, nil
+}

@@ -2,8 +2,11 @@ package handlers
 
 import (
 	"database/sql"
+	"encoding/csv"
+	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/devwithmohit/billing-system/services/dashboard-api/internal/repository"
 )
@@ -11,12 +14,14 @@ import (
 // UsageHandler handles usage-related requests
 type UsageHandler struct {
 	repo *repository.UsageRepository
+	db   *sql.DB
 }
 
 // NewUsageHandler creates a new usage handler
 func NewUsageHandler(db *sql.DB) *UsageHandler {
 	return &UsageHandler{
 		repo: repository.NewUsageRepository(db),
+		db:   db,
 	}
 }
 
@@ -107,4 +112,73 @@ func (h *UsageHandler) GetUsageByMetric(w http.ResponseWriter, r *http.Request) 
 		"days":        days,
 		"data":        metrics,
 	})
+}
+
+// ExportUsage handles GET /api/v1/usage/export?format=csv
+// API Contract §2.2 — streams usage events as CSV download.
+func (h *UsageHandler) ExportUsage(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := r.Context().Value("organization_id").(string)
+	if !ok {
+		respondError(w, http.StatusUnauthorized, "Missing organization context", "")
+		return
+	}
+
+	daysStr := r.URL.Query().Get("days")
+	days := 30
+	if daysStr != "" {
+		if d, err := strconv.Atoi(daysStr); err == nil && d > 0 && d <= 90 {
+			days = d
+		}
+	}
+
+	startDate := time.Now().UTC().AddDate(0, 0, -days)
+
+	rows, err := h.db.QueryContext(r.Context(), `
+		SELECT request_id, endpoint, method, status_code,
+		       response_time_ms, billable, weight, time
+		FROM usage_events
+		WHERE organization_id = $1::uuid AND time >= $2
+		ORDER BY time DESC
+		LIMIT 50000
+	`, orgID, startDate)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "Export query failed", err.Error())
+		return
+	}
+	defer rows.Close()
+
+	w.Header().Set("Content-Type", "text/csv")
+	w.Header().Set("Content-Disposition",
+		fmt.Sprintf("attachment; filename=usage_export_%s_%dd.csv", orgID[:8], days))
+	w.WriteHeader(http.StatusOK)
+
+	writer := csv.NewWriter(w)
+	defer writer.Flush()
+
+	// Header row
+	writer.Write([]string{
+		"request_id", "endpoint", "method", "status_code",
+		"response_time_ms", "billable", "weight", "timestamp",
+	})
+
+	for rows.Next() {
+		var reqID, endpoint, method string
+		var statusCode, responseTime, weight int
+		var billable bool
+		var ts time.Time
+
+		if err := rows.Scan(&reqID, &endpoint, &method, &statusCode,
+			&responseTime, &billable, &weight, &ts); err != nil {
+			continue
+		}
+
+		writer.Write([]string{
+			reqID, endpoint, method,
+			strconv.Itoa(statusCode),
+			strconv.Itoa(responseTime),
+			strconv.FormatBool(billable),
+			strconv.Itoa(weight),
+			ts.Format(time.RFC3339),
+		})
+	}
 }

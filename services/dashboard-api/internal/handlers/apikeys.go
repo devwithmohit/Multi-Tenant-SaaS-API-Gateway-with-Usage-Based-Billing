@@ -156,3 +156,36 @@ func (h *APIKeyHandler) RevokeAPIKey(w http.ResponseWriter, r *http.Request) {
 
 	respondJSON(w, http.StatusOK, response)
 }
+
+// RotateAPIKey handles POST /api/v1/apikeys/:id/rotate
+// Sprint 5.1: Create new key, schedule old key revocation with grace period.
+func (h *APIKeyHandler) RotateAPIKey(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := r.Context().Value("organization_id").(string)
+	if !ok {
+		respondError(w, http.StatusUnauthorized, "Missing organization context", "")
+		return
+	}
+	userID, _ := r.Context().Value("user_id").(string)
+	if userID == "" {
+		userID = "system"
+	}
+
+	keyID := chi.URLParam(r, "id")
+	if keyID == "" {
+		respondError(w, http.StatusBadRequest, "Missing API key ID", "")
+		return
+	}
+
+	newKey, fullKey, revokeAt, err := h.repo.RotateAPIKey(r.Context(), keyID, orgID, userID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to rotate API key", err.Error())
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"new_key":               newKey,
+		"full_key":              fullKey,
+		"old_key_revocation_at": revokeAt,
+		"message":               "Key rotated. Old key remains valid for 5 minutes. Save the new full_key — it won't be shown again.",
+	})
+}

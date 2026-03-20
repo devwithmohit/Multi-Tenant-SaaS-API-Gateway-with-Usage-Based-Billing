@@ -213,6 +213,118 @@ func (h *AuthHandler) generateToken(user *models.User) (string, int, error) {
 	return tokenString, expiresIn, nil
 }
 
+// Register handles POST /api/v1/auth/register
+// Sprint 8.2: User self-registration with org creation.
+func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Email     string `json:"email"`
+		Password  string `json:"password"`
+		FirstName string `json:"first_name"`
+		LastName  string `json:"last_name"`
+		OrgName   string `json:"organization_name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+	if req.Email == "" || req.Password == "" || req.OrgName == "" {
+		respondError(w, http.StatusBadRequest, "email, password, and organization_name are required", "")
+		return
+	}
+	if len(req.Password) < 8 {
+		respondError(w, http.StatusBadRequest, "Password must be at least 8 characters", "")
+		return
+	}
+
+	// Check for existing email
+	var exists bool
+	_ = h.db.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)`, req.Email).Scan(&exists)
+	if exists {
+		respondError(w, http.StatusConflict, "Email already registered", "")
+		return
+	}
+
+	// Hash password
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to hash password", "")
+		return
+	}
+
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "Database error", err.Error())
+		return
+	}
+	defer tx.Rollback()
+
+	// Create organization
+	var orgID string
+	err = tx.QueryRowContext(r.Context(), `
+		INSERT INTO organizations (name, billing_email, plan_tier, status)
+		VALUES ($1, $2, 'free', 'active')
+		RETURNING id
+	`, req.OrgName, req.Email).Scan(&orgID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to create organization", err.Error())
+		return
+	}
+
+	// Create user
+	var userID string
+	err = tx.QueryRowContext(r.Context(), `
+		INSERT INTO users (email, password_hash, organization_id, role, first_name, last_name)
+		VALUES ($1, $2, $3, 'admin', $4, $5)
+		RETURNING id
+	`, req.Email, string(hash), orgID, req.FirstName, req.LastName).Scan(&userID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to create user", err.Error())
+		return
+	}
+
+	// Assign free plan subscription
+	_, _ = tx.ExecContext(r.Context(), `
+		INSERT INTO organization_subscriptions (organization_id, plan_id, status, current_period_end)
+		VALUES ($1, 'free', 'active', DATE_TRUNC('month', NOW()) + INTERVAL '1 month')
+		ON CONFLICT (organization_id) DO NOTHING
+	`, orgID)
+
+	if err := tx.Commit(); err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to commit", err.Error())
+		return
+	}
+
+	// Generate token
+	user := &models.User{
+		ID:             userID,
+		Email:          req.Email,
+		OrganizationID: orgID,
+		Role:           "admin",
+		FirstName:      req.FirstName,
+		LastName:       req.LastName,
+	}
+
+	tokenString, expiresIn, err := h.generateToken(user)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to generate token", err.Error())
+		return
+	}
+
+	respondJSON(w, http.StatusCreated, map[string]interface{}{
+		"token":      tokenString,
+		"token_type": "Bearer",
+		"expires_in": expiresIn,
+		"user": map[string]interface{}{
+			"id":              userID,
+			"email":           req.Email,
+			"organization_id": orgID,
+			"role":            "admin",
+			"first_name":      req.FirstName,
+			"last_name":       req.LastName,
+		},
+	})
+}
+
 // Helper functions
 
 func respondJSON(w http.ResponseWriter, status int, data interface{}) {

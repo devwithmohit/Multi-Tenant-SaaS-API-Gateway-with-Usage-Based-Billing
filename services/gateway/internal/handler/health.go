@@ -84,6 +84,10 @@ func (h *Health) Ready(w http.ResponseWriter, r *http.Request) {
 		// Do NOT set allReady = false for Redis — allows degraded but functional mode
 	}
 
+	// Check Kafka (optional — gateway degrades to disk-buffer mode)
+	// Currently no Kafka health-check client is injected; report status as unavailable.
+	checks["kafka"] = false // Non-blocking: gateway buffers to disk when Kafka is down
+
 	status := "ready"
 	httpStatus := http.StatusOK
 	if !allReady {

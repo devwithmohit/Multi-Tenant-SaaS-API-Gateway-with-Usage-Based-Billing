@@ -37,6 +37,9 @@ func (rl *RateLimit) Middleware(next http.Handler) http.Handler {
 		// Get rate limit configuration from request context (database-driven)
 		config := reqCtx.RateLimit
 
+		// Sprint 2.8 — enforce body size limit (10 MB)
+		r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
+
 		// Check rate limit
 		ctx, cancel := context.WithTimeout(r.Context(), 100*time.Millisecond)
 		defer cancel()

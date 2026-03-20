@@ -19,6 +19,7 @@ import (
 	"github.com/stripe/stripe-go/v76/client"
 
 	"github.com/devwithmohit/Multi-Tenant-SaaS-API-Gateway-with-Usage-Based-Billing/services/billing-engine/internal/aggregator"
+	"github.com/devwithmohit/Multi-Tenant-SaaS-API-Gateway-with-Usage-Based-Billing/services/billing-engine/internal/alerts"
 	billingConfig "github.com/devwithmohit/Multi-Tenant-SaaS-API-Gateway-with-Usage-Based-Billing/services/billing-engine/internal/config"
 	"github.com/devwithmohit/Multi-Tenant-SaaS-API-Gateway-with-Usage-Based-Billing/services/billing-engine/internal/invoice"
 	"github.com/devwithmohit/Multi-Tenant-SaaS-API-Gateway-with-Usage-Based-Billing/services/billing-engine/internal/pricing"
@@ -139,6 +140,38 @@ func main() {
 	}
 	log.Printf("✅ Legacy billing job scheduled: %s", cfg.RunSchedule)
 
+	// Job 4: Alert evaluator — every 5 minutes (Sprint 6.3)
+	_, err = c.AddFunc("0 */5 * * * *", func() {
+		log.Println("🔔 Running alert evaluator...")
+		evalCtx, evalCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer evalCancel()
+		results, evalErr := runAlertEvaluation(evalCtx, db)
+		if evalErr != nil {
+			log.Printf("❌ Alert evaluation failed: %v", evalErr)
+		} else if len(results) > 0 {
+			log.Printf("🔔 %d alert(s) triggered", len(results))
+		}
+	})
+	if err != nil {
+		log.Printf("⚠️  Failed to setup alert evaluator: %v", err)
+	} else {
+		log.Println("✅ Alert evaluator scheduled: every 5 minutes")
+	}
+
+	// Job 5: Key expiration check — every 15 minutes (Expected Behavior §11.1)
+	_, err = c.AddFunc("0 */15 * * * *", func() {
+		log.Println("🔑 Checking for expired API keys...")
+		expErr := revokeExpiredKeys(db)
+		if expErr != nil {
+			log.Printf("❌ Key expiration check failed: %v", expErr)
+		}
+	})
+	if err != nil {
+		log.Printf("⚠️  Failed to setup key expiration job: %v", err)
+	} else {
+		log.Println("✅ Key expiration job scheduled: every 15 minutes")
+	}
+
 	// Run immediately if requested (for testing)
 	if os.Getenv("RUN_IMMEDIATELY") == "true" {
 		log.Println("🏃 Running billing job immediately (RUN_IMMEDIATELY=true)...")
@@ -157,6 +190,39 @@ func main() {
 	<-sigCh
 
 	log.Println("👋 Billing engine shutting down gracefully...")
+}
+
+// runAlertEvaluation evaluates usage thresholds for all orgs.
+func runAlertEvaluation(ctx context.Context, db *sql.DB) ([]string, error) {
+	evaluator := alerts.NewEvaluator(db)
+	results, err := evaluator.EvaluateAll(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, len(results))
+	for i, r := range results {
+		ids[i] = r.OrgID
+	}
+	return ids, nil
+}
+
+// revokeExpiredKeys deactivates API keys past their expires_at date.
+func revokeExpiredKeys(db *sql.DB) error {
+	result, err := db.Exec(`
+		UPDATE api_keys
+		SET is_active = false, revoked_at = NOW(), revoked_reason = 'expired'
+		WHERE is_active = true
+		  AND expires_at IS NOT NULL
+		  AND expires_at < NOW()
+	`)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows > 0 {
+		log.Printf("🔑 Revoked %d expired API key(s)", rows)
+	}
+	return nil
 }
 
 // runBillingJob executes the monthly billing process with invoice generation
