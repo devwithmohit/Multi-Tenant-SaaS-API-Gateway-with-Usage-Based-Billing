@@ -30,7 +30,7 @@ CREATE INDEX idx_pricing_plans_price ON pricing_plans(base_price_cents) WHERE is
 -- ======================================================================
 -- Track which plan each organization is subscribed to
 CREATE TABLE IF NOT EXISTS organization_subscriptions (
-    organization_id VARCHAR(255) PRIMARY KEY,
+    organization_id UUID PRIMARY KEY REFERENCES organizations(id) ON DELETE CASCADE,
     plan_id VARCHAR(50) NOT NULL REFERENCES pricing_plans(id),
     status VARCHAR(50) DEFAULT 'active',  -- active, cancelled, suspended, trialing
     trial_end_date TIMESTAMP WITH TIME ZONE,
@@ -56,7 +56,7 @@ CREATE INDEX idx_org_subscriptions_period_end ON organization_subscriptions(curr
 -- Monthly billing calculations and invoice records
 CREATE TABLE IF NOT EXISTS billing_records (
     id SERIAL PRIMARY KEY,
-    organization_id VARCHAR(255) NOT NULL,
+    organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     plan_id VARCHAR(50) NOT NULL REFERENCES pricing_plans(id),
     billing_month DATE NOT NULL,  -- First day of billing month (e.g., 2026-01-01)
 
@@ -122,7 +122,7 @@ CREATE INDEX idx_billing_records_invoice ON billing_records(invoice_number) WHER
 -- Audit log for all billing-related events
 CREATE TABLE IF NOT EXISTS billing_events (
     id SERIAL PRIMARY KEY,
-    organization_id VARCHAR(255) NOT NULL,
+    organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     billing_record_id INTEGER REFERENCES billing_records(id),
     event_type VARCHAR(100) NOT NULL,  -- calculated, invoice_generated, payment_attempted, payment_succeeded, payment_failed, refunded
     event_data JSONB,

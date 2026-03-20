@@ -29,13 +29,16 @@ func (r *Repository) FetchAllAPIKeys(ctx context.Context) (map[string]*cache.Cac
 			ak.key_hash,
 			ak.id,
 			ak.organization_id,
+			o.plan_tier,
 			COALESCE(rl.requests_per_minute, 60) as requests_per_minute,
 			COALESCE(rl.requests_per_day, 10000) as requests_per_day,
 			COALESCE(rl.burst_allowance, 10) as burst_allowance
 		FROM api_keys ak
+		JOIN organizations o ON ak.organization_id = o.id
 		LEFT JOIN rate_limit_configs rl ON ak.organization_id = rl.organization_id
 		WHERE ak.is_active = true
 		  AND ak.revoked_at IS NULL
+		  AND o.is_active = true
 	`
 
 	rows, err := r.db.QueryContext(ctx, query)
@@ -47,10 +50,10 @@ func (r *Repository) FetchAllAPIKeys(ctx context.Context) (map[string]*cache.Cac
 	keys := make(map[string]*cache.CachedKey)
 
 	for rows.Next() {
-		var keyHash, apiKeyID, orgID string
+		var keyHash, apiKeyID, orgID, planTier string
 		var reqsPerMinute, reqsPerDay, burstSize int
 
-		err := rows.Scan(&keyHash, &apiKeyID, &orgID, &reqsPerMinute, &reqsPerDay, &burstSize)
+		err := rows.Scan(&keyHash, &apiKeyID, &orgID, &planTier, &reqsPerMinute, &reqsPerDay, &burstSize)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
@@ -58,6 +61,7 @@ func (r *Repository) FetchAllAPIKeys(ctx context.Context) (map[string]*cache.Cac
 		keys[keyHash] = &cache.CachedKey{
 			APIKeyID:       apiKeyID,
 			OrganizationID: orgID,
+			PlanTier:       planTier,
 			RateLimitConfig: cache.RateLimitConfig{
 				RequestsPerMinute: reqsPerMinute,
 				RequestsPerDay:    reqsPerDay,
@@ -80,21 +84,24 @@ func (r *Repository) GetAPIKey(ctx context.Context, keyHash string) (*cache.Cach
 		SELECT
 			ak.id,
 			ak.organization_id,
+			o.plan_tier,
 			COALESCE(rl.requests_per_minute, 60) as requests_per_minute,
 			COALESCE(rl.requests_per_day, 10000) as requests_per_day,
 			COALESCE(rl.burst_allowance, 10) as burst_allowance
 		FROM api_keys ak
+		JOIN organizations o ON ak.organization_id = o.id
 		LEFT JOIN rate_limit_configs rl ON ak.organization_id = rl.organization_id
 		WHERE ak.key_hash = $1
 		  AND ak.is_active = true
 		  AND ak.revoked_at IS NULL
+		  AND o.is_active = true
 	`
 
-	var apiKeyID, orgID string
+	var apiKeyID, orgID, planTier string
 	var reqsPerMinute, reqsPerDay, burstSize int
 
 	err := r.db.QueryRowContext(ctx, query, keyHash).Scan(
-		&apiKeyID, &orgID, &reqsPerMinute, &reqsPerDay, &burstSize,
+		&apiKeyID, &orgID, &planTier, &reqsPerMinute, &reqsPerDay, &burstSize,
 	)
 
 	if err == sql.ErrNoRows {
@@ -108,6 +115,7 @@ func (r *Repository) GetAPIKey(ctx context.Context, keyHash string) (*cache.Cach
 	return &cache.CachedKey{
 		APIKeyID:       apiKeyID,
 		OrganizationID: orgID,
+		PlanTier:       planTier,
 		RateLimitConfig: cache.RateLimitConfig{
 			RequestsPerMinute: reqsPerMinute,
 			RequestsPerDay:    reqsPerDay,

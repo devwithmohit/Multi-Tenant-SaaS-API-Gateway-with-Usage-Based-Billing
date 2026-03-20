@@ -15,7 +15,10 @@ type RateLimitConfig struct {
 // CachedKey represents a cached API key with its associated data
 type CachedKey struct {
 	APIKeyID        string
+	KeyName         string          // Human-readable key name for audit logs
 	OrganizationID  string
+	OrgStatus       string          // Organization status: active, suspended, cancelled, pending
+	PlanTier        string          // Organization's plan tier (free, starter, growth, business, enterprise)
 	RateLimitConfig RateLimitConfig
 	ExpiresAt       time.Time
 }

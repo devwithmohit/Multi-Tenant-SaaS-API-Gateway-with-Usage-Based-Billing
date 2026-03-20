@@ -1,0 +1,12 @@
+# Ignore archive folder inside docs
+docs/archive/
+docs/archive/*
+**/docs/archive/
+**/docs/archive/*
+
+# Ignore everything inside docs/archive
+docs/archive/
+
+# (Optional) keep folder but ignore contents
+# docs/archive/*
+# !docs/archive/.gitkeep

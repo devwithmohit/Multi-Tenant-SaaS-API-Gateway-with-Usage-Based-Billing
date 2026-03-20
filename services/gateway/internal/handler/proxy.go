@@ -209,8 +209,8 @@ func (rw *responseWriter) WriteHeader(code int) {
 }
 
 // isBillable determines if a request should be billed based on status code
+// Only 2xx (success) and 3xx (redirect) are billable
+// 4xx (client errors) and 5xx (server errors) are NOT billable
 func (p *Proxy) isBillable(statusCode int) bool {
-	// Bill for successful requests (2xx) and client errors (4xx)
-	// Don't bill for server errors (5xx) as they're our fault
-	return statusCode >= 200 && statusCode < 500
+	return statusCode >= 200 && statusCode < 400
 }

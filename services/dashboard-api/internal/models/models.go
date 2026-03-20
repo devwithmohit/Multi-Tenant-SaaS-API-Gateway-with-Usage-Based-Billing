@@ -56,12 +56,23 @@ type UsageMetric struct {
 	Timestamp   time.Time `json:"timestamp"`
 }
 
+// RateLimitsInfo represents the rate limit state returned with current usage
+type RateLimitsInfo struct {
+	DailyLimit      int `json:"daily_limit"`
+	DailyUsed       int `json:"daily_used"`
+	DailyRemaining  int `json:"daily_remaining"`
+	MinuteLimit     int `json:"minute_limit"`
+	MinuteUsed      int `json:"minute_used"`
+	MinuteRemaining int `json:"minute_remaining"`
+}
+
 // CurrentUsageResponse represents real-time usage for today
 type CurrentUsageResponse struct {
 	OrganizationID string               `json:"organization_id"`
 	Date           string               `json:"date"` // YYYY-MM-DD
 	Metrics        []UsageMetricSummary `json:"metrics"`
 	TotalCost      float64              `json:"total_cost"`
+	RateLimits     *RateLimitsInfo      `json:"rate_limits,omitempty"`
 	UpdatedAt      time.Time            `json:"updated_at"`
 }
 

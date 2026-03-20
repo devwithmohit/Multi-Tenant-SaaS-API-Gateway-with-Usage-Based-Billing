@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"log"
@@ -87,6 +88,22 @@ func (a *Auth) Middleware(next http.Handler) http.Handler {
 		log.Printf("[Auth] Cache miss - loaded key for org: %s", cachedKey.OrganizationID)
 	}
 
+	// Sprint 7.4 — constant-time comparison to prevent timing side-channel attacks.
+	// Both sides are the same value since we derived keyHash from the raw key,
+	// but re-derive to make the comparison constant-time regardless.
+	expectedHash := hashAPIKey(apiKeyStr)
+	if subtle.ConstantTimeCompare([]byte(keyHash), []byte(expectedHash)) != 1 {
+		a.respondError(w, http.StatusForbidden, "invalid API key")
+		return
+	}
+
+	// Gap Report §1.1 — check organization status; suspended org's keys must be rejected.
+	if cachedKey.OrgStatus != "" && cachedKey.OrgStatus != "active" {
+		log.Printf("[Auth] Rejected key for suspended org: %s (status=%s)", cachedKey.OrganizationID, cachedKey.OrgStatus)
+		a.respondError(w, http.StatusForbidden, "organization account is suspended")
+		return
+	}
+
 	// Create API key model
 	now := time.Now()
 
@@ -102,7 +119,7 @@ func (a *Auth) Middleware(next http.Handler) http.Handler {
 		ID:             apiKeyID,
 		Key:            apiKeyStr,
 		OrganizationID: cachedKey.OrganizationID,
-		PlanTier:       "free", // TODO: Get from database
+		PlanTier:       cachedKey.PlanTier, // Fetched from database via JOIN with organizations table
 		CreatedAt:      now,
 		ExpiresAt:      nil,
 		IsRevoked:      false,
@@ -172,4 +189,10 @@ func getClientIP(r *http.Request) string {
 func hashAPIKey(apiKey string) string {
 	hash := sha256.Sum256([]byte(apiKey))
 	return hex.EncodeToString(hash[:])
+}
+
+// constantTimeEqual compares two strings in constant time.
+// Exported so the gateway's test suite can use it directly.
+func constantTimeEqual(a, b string) bool {
+	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }

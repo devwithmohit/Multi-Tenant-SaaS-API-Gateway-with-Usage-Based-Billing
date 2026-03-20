@@ -50,11 +50,11 @@ func (h *UsageHandler) GetUsageHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse query parameter for number of days (default 90)
+	// Parse query parameter for number of days (default 90, max 90 per API contract §2.2)
 	daysStr := r.URL.Query().Get("days")
 	days := 90 // default
 	if daysStr != "" {
-		if parsedDays, err := strconv.Atoi(daysStr); err == nil && parsedDays > 0 && parsedDays <= 365 {
+		if parsedDays, err := strconv.Atoi(daysStr); err == nil && parsedDays > 0 && parsedDays <= 90 {
 			days = parsedDays
 		}
 	}

@@ -104,6 +104,59 @@ func (h *AuthHandler) ValidateToken(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Logout handles POST /api/v1/auth/logout
+// JWT tokens are stateless; logout instructs the client to discard its token.
+// Sprint 5.1 — token blocklist (Redis-based) can be added in a later sprint.
+func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
+	respondJSON(w, http.StatusOK, map[string]string{
+		"message": "Logged out successfully. Please discard your access token.",
+	})
+}
+
+// Refresh handles POST /api/v1/auth/refresh
+// Re-issues a new JWT from a currently valid token.
+// The existing token must be valid (not expired) — this is a sliding-window refresh.
+// Sprint 5.1 — for a stateful approach, pair with a Redis-based refresh token in a later sprint.
+func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
+	claims, ok := r.Context().Value("claims").(models.JWTClaims)
+	if !ok {
+		respondError(w, http.StatusUnauthorized, "Invalid or missing token", "")
+		return
+	}
+
+	// Lookup current user to get latest role/org data
+	user, err := h.getUserByEmail(claims.Email)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			respondError(w, http.StatusUnauthorized, "User not found", "")
+		} else {
+			respondError(w, http.StatusInternalServerError, "Database error", err.Error())
+		}
+		return
+	}
+
+	// Issue fresh token
+	token, expiresIn, err := h.generateToken(user)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to generate token", err.Error())
+		return
+	}
+
+	respondJSON(w, http.StatusOK, models.LoginResponse{
+		Token:     token,
+		TokenType: "Bearer",
+		ExpiresIn: expiresIn,
+		User: &models.UserInfo{
+			ID:             user.ID,
+			Email:          user.Email,
+			OrganizationID: user.OrganizationID,
+			Role:           user.Role,
+			FirstName:      user.FirstName,
+			LastName:       user.LastName,
+		},
+	})
+}
+
 // getUserByEmail retrieves a user by email
 func (h *AuthHandler) getUserByEmail(email string) (*models.User, error) {
 	query := `

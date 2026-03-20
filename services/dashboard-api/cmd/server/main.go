@@ -44,6 +44,14 @@ func main() {
 	usageHandler := handlers.NewUsageHandler(db)
 	apiKeyHandler := handlers.NewAPIKeyHandler(db)
 	invoiceHandler := handlers.NewInvoiceHandler(db)
+	webhookHandler := handlers.NewWebhookHandler(db)
+	alertHandler := handlers.NewAlertHandler(db)
+	memberHandler := handlers.NewMemberHandler(db)
+	planHandler := handlers.NewPlanHandler(db)
+	gdprHandler := handlers.NewGDPRHandler(db)
+
+	// Initialize middleware
+	auditMiddleware := middleware.NewAuditMiddleware(db)
 
 	// Setup router
 	r := chi.NewRouter()
@@ -81,9 +89,13 @@ func main() {
 	r.Route("/api/v1", func(r chi.Router) {
 		// Apply tenant context middleware for multi-tenancy
 		r.Use(middleware.TenantContextMiddleware(db, cfg))
+		// Apply audit logging for all state-changing operations
+		r.Use(auditMiddleware.Middleware)
 
-		// Auth validation endpoint
+		// Auth endpoints
 		r.Get("/auth/validate", authHandler.ValidateToken)
+		r.Post("/auth/logout", authHandler.Logout)
+		r.Post("/auth/refresh", authHandler.Refresh)
 
 		// Usage endpoints
 		r.Route("/usage", func(r chi.Router) {
@@ -105,6 +117,38 @@ func main() {
 			r.Get("/", invoiceHandler.ListInvoices)
 			r.Get("/{id}", invoiceHandler.GetInvoice)
 			r.Get("/{id}/pdf", invoiceHandler.GetInvoicePDF)
+		})
+
+		// Webhook endpoints (Sprint 5.3)
+		r.Route("/webhooks", func(r chi.Router) {
+			r.Get("/", webhookHandler.ListWebhooks)
+			r.Post("/", webhookHandler.CreateWebhook)
+			r.Put("/{id}", webhookHandler.UpdateWebhook)
+			r.Delete("/{id}", webhookHandler.DeleteWebhook)
+		})
+
+		// Alert endpoints (Sprint 5.4)
+		r.Route("/alerts", func(r chi.Router) {
+			r.Get("/", alertHandler.ListAlerts)
+			r.Post("/", alertHandler.CreateAlert)
+			r.Put("/{id}", alertHandler.UpdateAlert)
+			r.Delete("/{id}", alertHandler.DeleteAlert)
+		})
+
+		// Organization routes (Sprint 5.2, 5.5)
+		r.Route("/organizations", func(r chi.Router) {
+			r.Put("/plan", planHandler.UpdatePlan)
+			r.Route("/members", func(r chi.Router) {
+				r.Get("/", memberHandler.ListMembers)
+				r.Post("/", memberHandler.InviteMember)
+				r.Delete("/{memberId}", memberHandler.RemoveMember)
+			})
+		})
+
+		// GDPR endpoints (Sprint 5.7)
+		r.Route("/gdpr", func(r chi.Router) {
+			r.Post("/export", gdprHandler.ExportData)
+			r.Delete("/delete", gdprHandler.DeleteAccount)
 		})
 	})
 

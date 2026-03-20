@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/saas-gateway/gateway/internal/cache"
 	"github.com/saas-gateway/gateway/internal/config"
 	"github.com/saas-gateway/gateway/internal/database"
@@ -67,23 +68,24 @@ func main() {
 	defer refreshManager.Stop()
 
 	// Initialize Redis (optional for MVP - graceful degradation)
+	// Declare at outer scope so health handler can use it for readiness check
 	var rateLimitMiddleware *middleware.RateLimit
+	var redisClient *ratelimit.RedisClient
 	if cfg.RedisAddr != "" {
-		redisClient, err := ratelimit.NewRedisClient(ratelimit.RedisConfig{
+		var err2 error
+		redisClient, err2 = ratelimit.NewRedisClient(ratelimit.RedisConfig{
 			Addr:     cfg.RedisAddr,
 			Password: cfg.RedisPassword,
 			DB:       cfg.RedisDB,
 			PoolSize: 10,
 		})
-		if err != nil {
-			log.Printf("⚠️  Warning: Failed to connect to Redis: %v", err)
+		if err2 != nil {
+			log.Printf("⚠️  Warning: Failed to connect to Redis: %v", err2)
 			log.Println("⚠️  Rate limiting will be disabled")
 		} else {
 			log.Println("✅ Connected to Redis for rate limiting")
 			limiter := ratelimit.NewRateLimiter(redisClient)
 			rateLimitMiddleware = middleware.NewRateLimit(limiter)
-
-			// Defer close
 			defer redisClient.Close()
 		}
 	} else {
@@ -115,8 +117,9 @@ func main() {
 		log.Println("ℹ️  Kafka disabled - usage event tracking disabled")
 	}
 
-	// Initialize handlers
-	healthHandler := handler.NewHealth()
+	// Initialize handlers — pass real dependencies to health handler
+	// Recovery Plan §2.3: readiness probe must check actual DB and Redis connectivity
+	healthHandler := handler.NewHealth(repo, redisClient)
 	proxyHandler, err := handler.NewProxy(cfg, eventProducer)
 	if err != nil {
 		log.Fatalf("Failed to initialize proxy handler: %v", err)
@@ -135,9 +138,14 @@ func main() {
 	router.HandleFunc("/health/ready", healthHandler.Ready).Methods("GET")
 	router.HandleFunc("/health/live", healthHandler.Live).Methods("GET")
 
+	// Prometheus metrics endpoint (no auth required)
+	// Recovery Plan §2.2 — activate metrics endpoint so Prometheus can scrape
+	router.Handle("/metrics", promhttp.Handler()).Methods("GET")
+
 	// API routes (with authentication)
 	apiRouter := router.PathPrefix("/").Subrouter()
 	apiRouter.Use(authMiddleware.Middleware)
+	apiRouter.Use(middleware.MetricsMiddleware) // Activate Prometheus metrics middleware
 
 	// Add rate limiting if Redis is available
 	if rateLimitMiddleware != nil {

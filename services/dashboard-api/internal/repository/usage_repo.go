@@ -23,8 +23,10 @@ func NewUsageRepository(db *sql.DB) *UsageRepository {
 func (r *UsageRepository) GetCurrentDayUsage(ctx context.Context, orgID string) (*models.CurrentUsageResponse, error) {
 	today := time.Now().UTC()
 	startOfDay := time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, time.UTC)
+	startOfMinute := today.Truncate(time.Minute)
 
-	query := `
+	// Query 1: current-day usage totals
+	usageQuery := `
 		SELECT
 			COUNT(*) as total_requests,
 			COUNT(*) FILTER (WHERE billable = true) as billable_requests,
@@ -39,7 +41,7 @@ func (r *UsageRepository) GetCurrentDayUsage(ctx context.Context, orgID string) 
 	var totalRequests, billableRequests, avgResponseTime, errorCount int
 	var lastUpdated time.Time
 
-	err := r.db.QueryRowContext(ctx, query, orgID, startOfDay).Scan(
+	err := r.db.QueryRowContext(ctx, usageQuery, orgID, startOfDay).Scan(
 		&totalRequests,
 		&billableRequests,
 		&avgResponseTime,
@@ -49,6 +51,41 @@ func (r *UsageRepository) GetCurrentDayUsage(ctx context.Context, orgID string) 
 
 	if err != nil && err != sql.ErrNoRows {
 		return nil, fmt.Errorf("failed to query current usage: %w", err)
+	}
+
+	// Query 2: rate limit config for this org (falls back to plan defaults)
+	var dailyLimit, minuteLimit int
+	rateLimitQuery := `
+		SELECT COALESCE(rlc.requests_per_day, 1000000),
+		       COALESCE(rlc.requests_per_minute, 1000)
+		FROM organizations o
+		LEFT JOIN rate_limit_configs rlc ON rlc.organization_id = o.id
+		WHERE o.id = $1::uuid
+	`
+	if rlErr := r.db.QueryRowContext(ctx, rateLimitQuery, orgID).Scan(&dailyLimit, &minuteLimit); rlErr != nil {
+		// Use safe defaults if query fails
+		dailyLimit = 1000000
+		minuteLimit = 1000
+	}
+
+	// Query 3: this-minute count (approximate from usage_events within current minute)
+	var minuteUsed int
+	minQuery := `
+		SELECT COUNT(*)
+		FROM usage_events
+		WHERE organization_id = $1::uuid AND time >= $2
+	`
+	if mqErr := r.db.QueryRowContext(ctx, minQuery, orgID, startOfMinute).Scan(&minuteUsed); mqErr != nil {
+		minuteUsed = 0 // non-blocking
+	}
+
+	dailyRemaining := dailyLimit - totalRequests
+	if dailyRemaining < 0 {
+		dailyRemaining = 0
+	}
+	minuteRemaining := minuteLimit - minuteUsed
+	if minuteRemaining < 0 {
+		minuteRemaining = 0
 	}
 
 	// Create metric summaries
@@ -70,6 +107,14 @@ func (r *UsageRepository) GetCurrentDayUsage(ctx context.Context, orgID string) 
 		Metrics:        metrics,
 		TotalCost:      totalCost,
 		UpdatedAt:      lastUpdated,
+		RateLimits: &models.RateLimitsInfo{
+			DailyLimit:      dailyLimit,
+			DailyUsed:       totalRequests,
+			DailyRemaining:  dailyRemaining,
+			MinuteLimit:     minuteLimit,
+			MinuteUsed:      minuteUsed,
+			MinuteRemaining: minuteRemaining,
+		},
 	}
 
 	return response, nil

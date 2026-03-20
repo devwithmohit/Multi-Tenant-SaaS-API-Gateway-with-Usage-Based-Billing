@@ -1,14 +1,20 @@
 package events
 
 import (
+	"bufio"
 	"encoding/json"
+	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 )
 
+// diskBufferDir is the directory for disk-based event fallback
+const diskBufferDir = "./buffer"
 // UsageEvent represents a single API request for billing purposes
 type UsageEvent struct {
 	RequestID      string    `json:"request_id"`
@@ -96,15 +102,133 @@ func NewEventProducer(config ProducerConfig) (*EventProducer, error) {
 	return ep, nil
 }
 
-// RecordUsage queues a usage event for async sending to Kafka
+// RecordUsage queues a usage event for async sending to Kafka.
+// Sprint 2.6: When buffer is full, events are written to disk instead of dropped.
 func (ep *EventProducer) RecordUsage(event UsageEvent) {
 	select {
 	case ep.buffer <- event:
 		// Event buffered successfully
 	default:
-		// Buffer full - log warning but don't block request
-		log.Printf("[EventProducer] WARNING: Buffer full, dropping event for org: %s", event.OrganizationID)
+		// Buffer full — write to disk fallback (never drop events)
+		log.Printf("[EventProducer] WARNING: Buffer full, writing event to disk for org: %s", event.OrganizationID)
+		if err := ep.writeToDisk(event); err != nil {
+			log.Printf("[EventProducer] CRITICAL: Disk fallback also failed, event dropped: %v", err)
+		}
 	}
+}
+
+// writeToDisk appends a single event to a JSONL file in the disk buffer directory.
+// Files are named by minute so replay is ordered and bounded in size.
+func (ep *EventProducer) writeToDisk(event UsageEvent) error {
+	if err := os.MkdirAll(diskBufferDir, 0755); err != nil {
+		return fmt.Errorf("create buffer dir: %w", err)
+	}
+
+	// File name buckets at 1-minute granularity to bound file size
+	fileName := fmt.Sprintf("events_%s.jsonl", time.Now().UTC().Format("20060102T1504"))
+	filePath := filepath.Join(diskBufferDir, fileName)
+
+	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("open buffer file %s: %w", filePath, err)
+	}
+	defer f.Close()
+
+	data, err := json.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("marshal event: %w", err)
+	}
+
+	_, err = f.WriteString(string(data) + "\n")
+	return err
+}
+
+// replayDiskBuffer is a background goroutine that periodically replays
+// disk-buffered events to Kafka when buffer space becomes available.
+// Sprint 2.6 — recovery path after Kafka or buffer overload.
+func (ep *EventProducer) replayDiskBuffer() {
+	ticker := time.NewTicker(30 * time.Second) // check every 30s
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			ep.drainDiskBuffer()
+		case <-ep.stopCh:
+			// Drain one final time on shutdown
+			ep.drainDiskBuffer()
+			return
+		}
+	}
+}
+
+// drainDiskBuffer reads all completed JSONL files from disk and replays them to Kafka.
+func (ep *EventProducer) drainDiskBuffer() {
+	files, err := filepath.Glob(filepath.Join(diskBufferDir, "events_*.jsonl"))
+	if err != nil || len(files) == 0 {
+		return
+	}
+
+	// Only replay files from previous minutes (not the currently-writing file)
+	currentFile := fmt.Sprintf("events_%s.jsonl", time.Now().UTC().Format("20060102T1504"))
+
+	for _, filePath := range files {
+		if filepath.Base(filePath) == currentFile {
+			continue // Skip active file
+		}
+
+		replayed, err := ep.replayFile(filePath)
+		if err != nil {
+			log.Printf("[EventProducer] Failed to replay disk buffer %s: %v", filePath, err)
+			continue
+		}
+
+		log.Printf("[EventProducer] Replayed %d events from disk: %s", replayed, filePath)
+
+		// Remove file after successful replay
+		if err := os.Remove(filePath); err != nil {
+			log.Printf("[EventProducer] Failed to remove replayed file %s: %v", filePath, err)
+		}
+	}
+}
+
+// replayFile replays all events from a single JSONL disk buffer file.
+func (ep *EventProducer) replayFile(filePath string) (int, error) {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return 0, fmt.Errorf("open %s: %w", filePath, err)
+	}
+	defer f.Close()
+
+	replayed := 0
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+
+		var event UsageEvent
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			log.Printf("[EventProducer] Skipping malformed disk event: %v", err)
+			continue
+		}
+
+		// Re-enqueue event; use blocking send with timeout to avoid infinite loop
+		select {
+		case ep.buffer <- event:
+			replayed++
+		case <-time.After(100 * time.Millisecond):
+			// Buffer still full; leave remaining events on disk for next pass
+			return replayed, fmt.Errorf("buffer still full, replayed %d so far", replayed)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return replayed, fmt.Errorf("scan %s: %w", filePath, err)
+	}
+
+	return replayed, nil
 }
 
 // flushWorker runs in background and batches events for efficient Kafka sending
